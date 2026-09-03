@@ -251,3 +251,10 @@ def test_item_table_values_come_from_the_parsed_row(standard):
     assert values["4.UNIT PRICE"] == "4.62"
     assert values["5.QUANTITY"] == "40"
     assert values["7.AMOUNT"] == "184.8"
+
+
+def test_a_blank_field_does_not_borrow_an_item_value(courier):
+    """The courier form carries a Country of Origin at both levels."""
+    origins = {f.key: f.value for f in courier[1] if f.label == "Country of Origin"}
+    assert origins["SPECIAL REQUESTS · Country of Origin"] == ""
+    assert origins["DETAILED DESCRIPTION OF ITEM · Country of Origin"] == "CHINA"

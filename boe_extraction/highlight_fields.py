@@ -222,11 +222,15 @@ def _qualify_repeats(fields):
 
 
 def _use_parsed_item_values(fields, boe):
-    """Take a per-item field's value from the item the parser built.
+    """Repair a per-item field's value from the item the parser built.
 
     Reading the item table by column clips a value that starts left of its own
     heading -- "3.DESCRIPTION" begins under "2.CTH". The parser has already
     read the row properly, so its value stands.
+
+    Only a value that was actually read is repaired. A field the form left
+    blank stays blank: a courier form carries a Country of Origin at document
+    level as well as on each item, and an empty one must not borrow the item's.
     """
     items = boe.all_items() if boe is not None else []
     if not items:
@@ -234,7 +238,7 @@ def _use_parsed_item_values(fields, boe):
     first = items[0].details
     for field in fields:
         parsed = first.get(field.label)
-        if parsed:
+        if parsed and field.value:
             field.value = parsed
     return fields
 
