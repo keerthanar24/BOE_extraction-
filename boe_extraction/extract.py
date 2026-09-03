@@ -1,5 +1,6 @@
 """Entry point: identify a Bill of Entry PDF and extract its line items."""
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pdfplumber
@@ -34,6 +35,23 @@ def extract(path):
     """Parse a Bill of Entry PDF into a BillOfEntry."""
     with pdfplumber.open(str(path)) as pdf:
         return _parse(pdf, path)[1]
+
+
+@dataclass
+class Document:
+    """One parsed bill of entry, with whatever was highlighted on it."""
+
+    name: str
+    boe: object
+    fields: list = field(default_factory=list)
+    highlights: list = field(default_factory=list)
+
+
+def extract_document(path, with_highlights=True):
+    """Parse a document, and resolve its highlights unless asked not to."""
+    boe, fields, highlights = (extract_with_highlights(path) if with_highlights
+                               else (extract(path), [], []))
+    return Document(Path(path).name, boe, fields, highlights)
 
 
 def extract_with_highlights(path):

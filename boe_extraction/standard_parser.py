@@ -45,6 +45,15 @@ def matches(first_page_text):
     return None
 
 
+def _text(value):
+    """A parsed figure back as the plain string a details column holds."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def _num(value):
     if value in (None, ""):
         return None
@@ -269,6 +278,19 @@ def parse(pdf, form_type, source_file=""):
             for key, (rate_value, amount) in duties.get("duties", {}).items():
                 setattr(item, f"{key}_rate", rate_value)
                 setattr(item, f"{key}_amount", amount)
+            # Keyed by the form's own labels, so a highlighted column that is
+            # not one of the 20 standard ones can still be reported per item.
+            item.details = {
+                "1.S NO.": str(item_sn),
+                "2.CTH": row["cth"],
+                "3.DESCRIPTION": row["description"],
+                "4.UNIT PRICE": _text(row["unit_price"]),
+                "5.QUANTITY": _text(row["quantity"]),
+                "6.UQC": row["uqc"],
+                "7.AMOUNT": _text(row["amount"]),
+                "29.ASSESS VALUE": _text(duties.get("assessable_value")),
+                "30.TOTAL DUTY": _text(duties.get("duty_amount")),
+            }
             item.duty_amount = duties.get("duty_amount")
             item.backfill_bcd()
             if item.duty_amount is None:

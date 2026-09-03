@@ -15,6 +15,30 @@ FBA15M6L9KGF01_courier_cbe_xiv.pdf: CBE-XIV, BE CBEXIV_DEL_2026-2027_2808_10570,
   output/BOE__FBA15M6L9KGF01__extracted.xlsx  (4 rows, assessable 104,220.00, duty 45,814.00)
 ```
 
+## One workbook for a whole batch
+
+`--combined` writes every document given into a single file instead of one
+workbook per invoice. Each sheet carries a Document column, so several bills of
+entry — and several document types — sit side by side.
+
+```bash
+python -m boe_extraction.cli samples/*.pdf --combined output/BOE_extraction.xlsx
+```
+
+| Sheet | What it holds |
+| --- | --- |
+| Documents | One row per document: form type, BE number, importer, exchange rate, totals |
+| Invoices | One row per invoice, with its supplier, value and totals |
+| Line Items | Every item of every invoice, across the 20 standard columns |
+| Highlighted Fields | Every highlight resolved to a field and its value |
+| Item Details | The highlighted per-item fields, under each form's own labels |
+| Highlights (raw) | The highlighted text verbatim |
+
+Line Items is the normalised view — the same 20 columns whichever form the
+document came from. Item Details keeps each form's own labels, so the same
+figure can appear in both under different names (`3.DESCRIPTION` on the ICEGATE
+form, `Item Description` on the courier one).
+
 ## Extracting what a reviewer highlighted
 
 The marked-up documents carry PDF highlight annotations over the fields that

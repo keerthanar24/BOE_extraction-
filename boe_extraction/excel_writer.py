@@ -196,6 +196,156 @@ def write_highlighted(boe, fields, highlights, path):
     return path
 
 
+def _totals(items, field):
+    return round(sum(getattr(i, field) or 0 for i in items), 2)
+
+
+def _write_documents(sheet, documents):
+    sheet.append(["Document", "Form Type", "BE Number", "BE Date", "Port Code",
+                  "Importer", "IEC", "GSTIN", "Currency", "Exchange Rate",
+                  "Invoices", "Line Items", "Assessable Value", "Total Duty",
+                  "Highlights"])
+    for document in documents:
+        boe, items = document.boe, document.boe.all_items()
+        sheet.append([document.name, boe.form_type, boe.be_number, boe.be_date,
+                      boe.port_code, boe.importer_name, boe.iec, boe.gstin,
+                      boe.currency, boe.exchange_rate, len(boe.invoices),
+                      len(items), _totals(items, "assessable_value"),
+                      _totals(items, "duty_amount"), len(document.highlights)])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index in range(1, 16):
+        sheet.column_dimensions[get_column_letter(index)].width = 20
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["F"].width = 28
+    for row in range(2, sheet.max_row + 1):
+        for index in (13, 14):
+            sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "B2"
+
+
+def _write_invoices(sheet, documents):
+    sheet.append(["Document", "Invoice Number", "Invoice Date", "Supplier",
+                  "Invoice Value", "Currency", "Exchange Rate", "Line Items",
+                  "Assessable Value", "Total Duty"])
+    for document in documents:
+        for invoice in document.boe.invoices:
+            sheet.append([document.name, invoice.number, invoice.date,
+                          invoice.supplier, invoice.invoice_value,
+                          invoice.currency, invoice.exchange_rate,
+                          len(invoice.items),
+                          _totals(invoice.items, "assessable_value"),
+                          _totals(invoice.items, "duty_amount")])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index in range(1, 11):
+        sheet.column_dimensions[get_column_letter(index)].width = 18
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["D"].width = 30
+    for row in range(2, sheet.max_row + 1):
+        for index in (5, 9, 10):
+            sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "B2"
+
+
+def _write_combined_fields(sheet, documents):
+    sheet.append(["Document", "Page", "Field", "Value"])
+    for document in documents:
+        for field in document.fields:
+            sheet.append([document.name, field.page + 1, field.label, field.value])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["B"].width = 7
+    sheet.column_dimensions["C"].width = 38
+    sheet.column_dimensions["D"].width = 66
+    sheet.freeze_panes = "C2"
+
+
+def _write_combined_items(sheet, documents):
+    sheet.append(["Document", "Invoice"] + [title for _, title in ITEM_COLUMNS])
+    for document in documents:
+        for invoice in document.boe.invoices:
+            for item in invoice.items:
+                sheet.append([document.name, invoice.number]
+                             + [getattr(item, field) for field, _ in ITEM_COLUMNS])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["B"].width = 18
+    for index, (_, title) in enumerate(ITEM_COLUMNS, start=3):
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
+        if title in MONEY_COLUMNS:
+            for row in range(2, sheet.max_row + 1):
+                sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "C2"
+
+
+def _write_combined_details(sheet, documents):
+    columns = []
+    for document in documents:
+        for label in _highlighted_item_labels(document.boe, document.fields):
+            if label not in columns:
+                columns.append(label)
+    if not columns:
+        return False
+    sheet.append(["Document", "Invoice", "Item Number"] + columns)
+    for document in documents:
+        for invoice in document.boe.invoices:
+            for item in invoice.items:
+                sheet.append([document.name, invoice.number, item.item_number]
+                             + [item.details.get(label, "") for label in columns])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["B"].width = 18
+    sheet.column_dimensions["C"].width = 12
+    for index in range(4, len(columns) + 4):
+        sheet.column_dimensions[get_column_letter(index)].width = 28
+    sheet.freeze_panes = "D2"
+    return True
+
+
+def _write_combined_raw(sheet, documents):
+    sheet.append(["Document", "Page", "Highlighted text"])
+    for document in documents:
+        for highlight in document.highlights:
+            sheet.append([document.name, highlight.page + 1, highlight.text])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.column_dimensions["A"].width = 34
+    sheet.column_dimensions["B"].width = 7
+    sheet.column_dimensions["C"].width = 110
+    sheet.freeze_panes = "C2"
+
+
+def write_combined(documents, path):
+    """One workbook covering every document in a run.
+
+    Each sheet carries a Document column, so several bills of entry -- and
+    several document types -- sit side by side in the same file.
+    """
+    workbook = Workbook()
+    summary = workbook.active
+    summary.title = "Documents"
+    _write_documents(summary, documents)
+    _write_invoices(workbook.create_sheet("Invoices"), documents)
+    _write_combined_items(workbook.create_sheet("Line Items"), documents)
+    if any(d.fields for d in documents):
+        _write_combined_fields(workbook.create_sheet("Highlighted Fields"), documents)
+        details = workbook.create_sheet("Item Details")
+        if not _write_combined_details(details, documents):
+            workbook.remove(details)
+        _write_combined_raw(workbook.create_sheet("Highlights (raw)"), documents)
+    workbook.save(path)
+    return path
+
+
 def output_paths(boe, output_dir, stem=None):
     """The workbook path for each invoice in the document."""
     paths = []

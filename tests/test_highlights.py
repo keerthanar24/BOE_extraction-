@@ -131,3 +131,47 @@ def test_workbook_records_every_highlight_verbatim(tmp_path, standard):
     path = write_highlighted(boe, fields, highlights, tmp_path / "h.xlsx")
     sheet = load_workbook(path)["Highlights (raw)"]
     assert sheet.max_row == len(highlights) + 1
+
+
+def test_combined_workbook_holds_every_document(tmp_path):
+    """One workbook per run, with every document side by side."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_combined
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(COURIER), extract_document(STANDARD)]
+    path = write_combined(documents, tmp_path / "combined.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Documents", "Invoices", "Line Items",
+                                   "Highlighted Fields", "Item Details",
+                                   "Highlights (raw)"]
+
+    # Every sheet names the document each row came from.
+    for name in workbook.sheetnames:
+        assert workbook[name]["A1"].value == "Document"
+
+    assert workbook["Documents"].max_row == 3          # header plus two documents
+    assert workbook["Invoices"].max_row == 4           # one courier, two ICEGATE
+    assert workbook["Line Items"].max_row == 14        # 4 + 9 items
+    assert workbook["Highlights (raw)"].max_row == 55 + 84 + 1
+
+
+def test_combined_totals_match_the_documents(tmp_path):
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_combined
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(COURIER), extract_document(STANDARD)]
+    path = write_combined(documents, tmp_path / "combined.xlsx")
+    sheet = load_workbook(path)["Documents"]
+    rows = {r[0]: r for r in sheet.iter_rows(min_row=2, values_only=True)}
+
+    courier = rows[COURIER.name]
+    assert courier[1] == "CBE-XIV"
+    assert (courier[11], courier[12], courier[13]) == (4, 104220, 45814)
+
+    standard = rows[STANDARD.name]
+    assert standard[1] == "ICEGATE BOE"
+    assert (standard[11], standard[12]) == (9, 560008)
