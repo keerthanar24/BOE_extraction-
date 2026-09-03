@@ -1,0 +1,16 @@
+[project]
+name = "boe-extraction"
+version = "0.2.0"
+description = "Extract Bill of Entry line items from customs PDFs into Excel"
+requires-python = ">=3.9"
+dependencies = ["pdfplumber>=0.11", "openpyxl>=3.1"]
+
+[project.scripts]
+boe-extract = "boe_extraction.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["boe_extraction"]
