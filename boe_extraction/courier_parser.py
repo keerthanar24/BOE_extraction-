@@ -26,6 +26,13 @@ INVOICE_MARKER = re.compile(r"^Details\s+Of\s+Invoice\s*-\s*(\d+)$", re.IGNORECA
 INVOICE_ITEMS_MARKER = re.compile(
     r"^DETAILS OF ITEM\(S\) IN INVOICE\s*-\s*(\d+)", re.IGNORECASE)
 ITEM_MARKER = re.compile(r"^Details\s+Of\s+Item\s*-\s*(\d+)$", re.IGNORECASE)
+# CBE-XIII lists its items flat, each opened by a bare "ITEM :".
+XIII_ITEM_MARKER = re.compile(r"^ITEM\s*:$", re.IGNORECASE)
+
+# The two forms name the same field differently.
+DESCRIPTION = ("Item Description", "Description of Goods", "General Description")
+HS_CODE = ("CTSH", "CETSH", "RITC")
+EXCHANGE_RATE = ("Rate Of Exchange", "Rate of Exchange")
 
 
 def matches(first_page_text):
@@ -86,13 +93,16 @@ class _Section:
 def _sections(entries, pattern):
     """Split entries at each marker matching ``pattern``.
 
-    Yields (marker number, entries up to the next marker of the same kind).
+    Yields (marker number, entries up to the next marker of the same kind). A
+    marker that carries no number of its own -- CBE-XIII opens every item with
+    a bare "ITEM :" -- is numbered by its position.
     """
     starts = [i for i, e in enumerate(entries)
               if isinstance(e, Marker) and pattern.match(e.text)]
     for position, start in enumerate(starts):
         end = starts[position + 1] if position + 1 < len(starts) else len(entries)
-        number = int(pattern.match(entries[start].text).group(1))
+        match = pattern.match(entries[start].text)
+        number = int(match.group(1)) if match.groups() else position + 1
         yield number, entries[start:end]
 
 
@@ -113,12 +123,12 @@ def _duties_in(lines, start, end):
 
 def _parse_item(section, number, lines, next_start):
     item = LineItem(item_number=number)
-    item.description = section.get("Item Description", "General Description")
-    item.hs_code = section.get("CTSH", "CETSH", "RITC")
+    item.description = section.get(*DESCRIPTION)
+    item.hs_code = section.get(*HS_CODE)
     item.quantity = section.number("Quantity")
     item.unit_of_measure = section.get("Unit of Measure")
     item.unit_price = section.number("Unit Price")
-    item.exchange_rate = section.number("Rate Of Exchange")
+    item.exchange_rate = section.number(*EXCHANGE_RATE)
     item.assessable_value = section.number("Assessable Value")
 
     start, _ = section.span()
@@ -159,29 +169,71 @@ def _parse_invoice(header, items_entries, lines, section_end):
     return invoice
 
 
+def _parse_xiii(entries, lines, document, boe, end_of_document):
+    """Items of a CBE-XIII, which lists them flat rather than under invoices.
+
+    There is no invoice section on this form: each item names the invoice it
+    belongs to, so the invoices are grouped from the items.
+    """
+    supplier = document.get("Name of Consignor")
+    sections = list(_sections(entries, XIII_ITEM_MARKER))
+    invoices = {}
+    for position, (_, block) in enumerate(sections):
+        if position + 1 < len(sections):
+            following = sections[position + 1][1][0]
+            next_start = (following.page, following.top)
+        else:
+            next_start = end_of_document
+        section = _Section(block)
+        number = sum(len(i.items) for i in invoices.values()) + 1
+        item = _parse_item(section, number, lines, next_start)
+
+        key = section.get("Invoice Number")
+        invoice = invoices.get(key)
+        if invoice is None:
+            invoice = Invoice(number=key, supplier=supplier,
+                              currency=section.get("Currency of Invoice"),
+                              invoice_value=0.0)
+            invoices[key] = invoice
+        invoice.items.append(item)
+        # The form gives each item's share of the invoice, not the total.
+        invoice.invoice_value = round(
+            (invoice.invoice_value or 0) + (section.number("Invoice Value") or 0), 2)
+        if item.exchange_rate is not None:
+            invoice.exchange_rate = item.exchange_rate
+    return list(invoices.values())
+
+
 def parse(pdf, form_type, source_file=""):
     entries = read_entries(pdf)
     lines = document_lines(pdf)
     document = _Section(entries)
 
     boe = BillOfEntry(form_type=form_type, source_file=source_file)
-    boe.be_number = document.get("CBEXIV Number", "CBEXIII Number", "BOE Number")
+    boe.be_number = document.get("CBEXIV Number", "CBE-XIII Number",
+                                 "CBEXIII Number", "BOE Number")
     boe.be_date = document.get("BOE Date")
     boe.be_type = document.get("Type Of BOE")
-    boe.iec = document.get("Import export Code")
+    boe.iec = document.get("Import export Code", "Import Export Code")
     boe.gstin = document.get("KYC ID")
-    boe.ad_code = document.get("Authorised Dealer Code Of Bank")
+    boe.ad_code = document.get("Authorised Dealer Code Of Bank", "AD Code")
     boe.country_of_origin = document.get("Country of Origin")
-    boe.country_of_consignment = document.get("Country of Consignment")
+    boe.country_of_consignment = document.get("Country of Consignment",
+                                              "Country of Exportation")
 
     for position, entry in enumerate(entries):
         if isinstance(entry, Marker) and entry.text.upper().startswith("PARTICULARS OF THE IMPORTER"):
             boe.importer_name = _Section(entries[position:position + 6]).get("Name")
             break
 
+    end_of_document = (len(pdf.pages), 0)
+    if form_type == "CBE-XIII":
+        boe.importer_name = document.get("Name of Consignee")
+        boe.invoices = _parse_xiii(entries, lines, document, boe, end_of_document)
+        return _finish(boe)
+
     headers = dict(_sections(entries, INVOICE_MARKER))
     item_blocks = list(_sections(entries, INVOICE_ITEMS_MARKER))
-    end_of_document = (len(pdf.pages), 0)
 
     for position, (number, block) in enumerate(item_blocks):
         section_end = end_of_document
@@ -190,7 +242,11 @@ def parse(pdf, form_type, source_file=""):
             section_end = (following.page, following.top)
         header = _Section(headers.get(number, []))
         boe.invoices.append(_parse_invoice(header, block, lines, section_end))
+    return _finish(boe)
 
+
+def _finish(boe):
+    """Lift the exchange rate and currency the invoices agree on."""
     rates = [i.exchange_rate for i in boe.invoices if i.exchange_rate]
     if rates:
         boe.exchange_rate = rates[0]

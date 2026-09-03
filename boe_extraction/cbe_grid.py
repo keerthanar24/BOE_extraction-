@@ -33,7 +33,7 @@ HEADING_CENTRE_SLACK = 45
 MAX_HEADING_GAP = 40
 
 SECTION_MARKER = re.compile(
-    r"^(Details\s+Of\s+(?:Item|Invoice)\s*-\s*\d+)$", re.IGNORECASE)
+    r"^(Details\s+Of\s+(?:Item|Invoice)\s*-\s*\d+|ITEM\s*:)$", re.IGNORECASE)
 HEADING_TEXT = re.compile(r"^[A-Z0-9][A-Z0-9 ()\[\]/,.&:;'\-]{7,}$")
 PAGE_FOOTER = re.compile(r"^Page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
 
@@ -173,20 +173,33 @@ class _Column:
         self.entries = entries
         self.current = None
 
-    def label(self, page, top, text):
-        # A finished label -- or a value that arrived without one -- means the
-        # next label fragment opens a new cell.
-        if (self.current is None or self.current.label_done
-                or (self.current.value and not self.current.label)):
-            self.current = Cell(page, top, self.name)
-            self.entries.append(self.current)
-        self.current.add_label(text)
+    def add(self, page, top, label, value):
+        """Place a line's label and value fragments into this column.
 
-    def value(self, page, top, text):
-        if self.current is None:
-            self.current = Cell(page, top, self.name)
-            self.entries.append(self.current)
-        self.current.add_value(text)
+        Not every label on these forms ends in a colon ("Marks on Packages 0"),
+        so a finished label is not the only thing that closes a cell. A cell
+        that already holds a value is closed too, once the next line brings a
+        label *and* a value of its own -- that is a new row, whereas a label
+        alone is the rest of a label wrapped onto a second line
+        ("Import Export Branch" / "Code:").
+
+        The exception is a value broken across lines with a hyphen, where the
+        label wraps with it ("Name of the Authorized" / "Courier:" holding
+        "KBR INTERNATIONAL LO-" / "GISTICS"). Those are one row.
+        """
+        if label:
+            wrapping = self.current is not None and self.current.value.endswith("-")
+            starts_row = self.current is not None and self.current.value and (
+                bool(value) or not self.current.label) and not wrapping
+            if self.current is None or self.current.label_done or starts_row:
+                self.current = Cell(page, top, self.name)
+                self.entries.append(self.current)
+            self.current.add_label(label)
+        if value:
+            if self.current is None:
+                self.current = Cell(page, top, self.name)
+                self.entries.append(self.current)
+            self.current.add_value(value)
 
     def close(self):
         self.current = None
@@ -229,14 +242,8 @@ def read_entries(pdf):
             value_words, right_label_words = _split_off_label(
                 middle, left_column, right_column)
 
-            if label_words:
-                left.label(page_index, top, _text(label_words))
-            if value_words:
-                left.value(page_index, top, _text(value_words))
-            if right_label_words:
-                right.label(page_index, top, _text(right_label_words))
-            if tail:
-                right.value(page_index, top, _text(tail))
+            left.add(page_index, top, _text(label_words), _text(value_words))
+            right.add(page_index, top, _text(right_label_words), _text(tail))
     return entries
 
 
