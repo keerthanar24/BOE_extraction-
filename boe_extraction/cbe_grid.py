@@ -27,6 +27,10 @@ MIN_LABEL_GAP = 20
 VALUE_COLUMN_WIDTH = 60
 # How near the page centre a line must sit to read as a section heading.
 HEADING_CENTRE_SLACK = 45
+# A heading is one contiguous run of words. A wider gap than this means the
+# line is two columns -- "GISTICS" and "WEST,PATEL" continuing the values
+# above them, not a centred heading.
+MAX_HEADING_GAP = 40
 
 SECTION_MARKER = re.compile(
     r"^(Details\s+Of\s+(?:Item|Invoice)\s*-\s*\d+)$", re.IGNORECASE)
@@ -153,6 +157,9 @@ def _is_heading(line, page_centre, columns):
         if not word["text"].endswith(":"):
             continue
         if any(column + low <= word["x1"] <= column + high for column in columns):
+            return False
+    for index in range(1, len(line)):
+        if line[index]["x0"] - line[index - 1]["x1"] > MAX_HEADING_GAP:
             return False
     centre = (line[0]["x0"] + line[-1]["x1"]) / 2
     return abs(centre - page_centre) <= HEADING_CENTRE_SLACK

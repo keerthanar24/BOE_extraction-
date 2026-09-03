@@ -324,6 +324,125 @@ def _write_combined_raw(sheet, documents):
     sheet.freeze_panes = "C2"
 
 
+def _split_levels(document):
+    """The document's highlighted fields, split into per-item and per-document."""
+    item_labels = set(_highlighted_item_labels(document.boe, document.fields))
+    document_fields, item_fields = [], []
+    for field in document.fields:
+        (item_fields if field.label in item_labels else document_fields).append(field)
+    return document_fields, item_fields
+
+
+def _column_order(per_document):
+    """Every field name across the documents, in the order they were read."""
+    order = []
+    for fields in per_document:
+        for field in fields:
+            if field.key not in order:
+                order.append(field.key)
+    return order
+
+
+def _style_wide(sheet, fixed_widths, first_data_column):
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index, width in enumerate(fixed_widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    for index in range(first_data_column, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(index)].width = 26
+    sheet.freeze_panes = f"{get_column_letter(first_data_column)}2"
+    sheet.row_dimensions[1].height = 46
+
+
+def _write_mandatory_document(sheet, documents, columns):
+    sheet.append(["Document", "Form Type", "BE Number"] + columns)
+    for document, fields in documents:
+        values = {field.key: field.value for field in fields}
+        sheet.append([document.name, document.boe.form_type, document.boe.be_number]
+                     + [values.get(column, "") for column in columns])
+    _style_wide(sheet, [34, 14, 30], 4)
+
+
+def _write_mandatory_items(sheet, documents, columns, labels_by_key):
+    sheet.append(["Document", "Invoice", "Item Number"] + columns)
+    for document, _ in documents:
+        for invoice in document.boe.invoices:
+            for item in invoice.items:
+                sheet.append([document.name, invoice.number, item.item_number]
+                             + [item.details.get(labels_by_key[c], "")
+                                for c in columns])
+    _style_wide(sheet, [34, 18, 12], 4)
+
+
+def _write_checklist(sheet, documents, document_columns, item_columns,
+                     labels_by_key, item_documents):
+    """Which mandatory fields came out filled, and which did not.
+
+    A field is only counted against the documents whose form carries it: the
+    two forms name their columns differently, so most are asked of one form.
+    """
+    sheet.append(["Field", "Level", "Records", "Filled", "Empty in"])
+    for column in document_columns:
+        filled, empty = 0, []
+        for document, fields in documents:
+            values = {field.key: field.value for field in fields}
+            if column not in values:
+                continue
+            if values[column]:
+                filled += 1
+            else:
+                empty.append(document.name)
+        present = sum(1 for _, fields in documents
+                      if any(f.key == column for f in fields))
+        sheet.append([column, "Document", present, filled, ", ".join(empty)])
+
+    for column in item_columns:
+        label = labels_by_key[column]
+        rows = [item for document, fields in item_documents
+                if any(f.key == column for f in fields)
+                for item in document.boe.all_items()]
+        sheet.append([column, "Line item", len(rows),
+                      sum(1 for i in rows if i.details.get(label)), ""])
+
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for index, width in enumerate([56, 12, 12, 10, 40], start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+
+
+def write_mandatory(documents, path):
+    """The highlighted fields as a schema: one column each, one row per record.
+
+    The highlights are the required-field list, so they become the columns of
+    the extract rather than a name/value listing.
+    """
+    split = [(document, _split_levels(document)) for document in documents]
+    document_level = [(d, fields[0]) for d, fields in split]
+    item_level = [(d, fields[1]) for d, fields in split]
+
+    document_columns = _column_order([fields for _, fields in document_level])
+    item_columns = _column_order([fields for _, fields in item_level])
+    labels_by_key = {field.key: field.label
+                     for _, fields in item_level for field in fields}
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Mandatory Fields"
+    _write_mandatory_document(sheet, document_level, document_columns)
+    if item_columns:
+        _write_mandatory_items(workbook.create_sheet("Mandatory Item Fields"),
+                               item_level, item_columns, labels_by_key)
+    _write_combined_items(workbook.create_sheet("Line Items"), documents)
+    _write_checklist(workbook.create_sheet("Field Checklist"),
+                     document_level, document_columns, item_columns,
+                     labels_by_key, item_level)
+    _write_combined_raw(workbook.create_sheet("Highlights (raw)"), documents)
+    workbook.save(path)
+    return path
+
+
 def write_combined(documents, path):
     """One workbook covering every document in a run.
 

@@ -13,7 +13,7 @@ column is then split at the gap between the heading and its value.
 
 import re
 
-from .pdf_text import upright_page, word_lines
+from .pdf_text import is_bold, upright_page, word_lines
 
 # A column number: one or two digits and a dot, not the decimal point of a
 # figure -- "1.BCD" and "12. PROV/" are headings, "84001.2" is a value.
@@ -47,15 +47,22 @@ class Column:
         return self.x0 - 6 <= centre < self.until
 
     def split(self):
-        """Separate the heading from a value printed beside it."""
-        widest, at = 0, None
+        """Separate the heading from a value printed beside it.
+
+        The form sets headings in bold and values in regular, so the value
+        starts at the first regular word. A few cells are bold throughout
+        ("6. AD CODE 6480001"); there the break is the first gap wider than the
+        form's word spacing -- the first, not the widest, because in
+        "15.Term CIF No" the widest gap falls after the value.
+        """
+        for index in range(1, len(self.words)):
+            if not is_bold(self.words[index]):
+                return _text(self.words[:index]), _text(self.words[index:])
         for index in range(1, len(self.words)):
             gap = self.words[index]["x0"] - self.words[index - 1]["x1"]
-            if gap > widest:
-                widest, at = gap, index
-        if at is None or widest < MIN_INLINE_GAP:
-            return _text(self.words), ""
-        return _text(self.words[:at]), _text(self.words[at:])
+            if gap >= MIN_INLINE_GAP:
+                return _text(self.words[:index]), _text(self.words[index:])
+        return _text(self.words), ""
 
     @property
     def label(self):
@@ -100,6 +107,26 @@ def _bare_columns(line):
     return _set_bounds(columns)
 
 
+def _separate(numbered, bare):
+    """Let an unnumbered heading claim its own space on a numbered line.
+
+    "1.EVENT 2.DATE 3.TIME EXCHANGE RATE" carries both kinds, and without this
+    the last numbered column swallows the unnumbered heading.
+    """
+    kept = []
+    for column in bare:
+        owner = next((c for c in numbered
+                      if c.x0 < column.x0 < c.until), None)
+        if owner is None:
+            continue
+        labels = set(id(w) for w in column.words)
+        owner.words = [w for w in owner.words if id(w) not in labels]
+        owner.until = min(owner.until, column.x0 - 6)
+        column.rest = [w for w in owner.words if w["x0"] > column.x0]
+        kept.append(column)
+    return [c for c in numbered if c.words], kept
+
+
 def _value_line(lines, index, heading):
     """The line of values under a heading line, if there is one."""
     bottom = max(w["bottom"] for w in heading)
@@ -140,7 +167,9 @@ def read_tables(pdf):
         lines = word_lines(upright_page(page))
         for index, line in enumerate(lines):
             columns = _numbered_columns(line)
-            bare = [] if columns else _bare_columns(line)
+            bare = _bare_columns(line)
+            if columns and bare:
+                columns, bare = _separate(columns, bare)
             if not columns and not bare:
                 continue
 

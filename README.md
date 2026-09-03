@@ -15,6 +15,32 @@ FBA15M6L9KGF01_courier_cbe_xiv.pdf: CBE-XIV, BE CBEXIV_DEL_2026-2027_2808_10570,
   output/BOE__FBA15M6L9KGF01__extracted.xlsx  (4 rows, assessable 104,220.00, duty 45,814.00)
 ```
 
+## The highlighted fields as mandatory columns
+
+When the highlights are the required-field list, they belong in the header row
+rather than in a name/value listing. `--mandatory` pivots them: one column per
+highlighted field, one row per document and one per line item.
+
+```bash
+python -m boe_extraction.cli samples/*.pdf --mandatory output/BOE_mandatory_fields.xlsx
+```
+
+| Sheet | What it holds |
+| --- | --- |
+| Mandatory Fields | One row per document, one column per highlighted document-level field |
+| Mandatory Item Fields | One row per line item, one column per highlighted per-item field |
+| Line Items | The 20 standard columns, both forms normalised |
+| Field Checklist | Each mandatory field, how many records carry it, and how many came out filled |
+| Highlights (raw) | The highlighted text verbatim |
+
+A field is only counted in the checklist against the documents whose form
+carries it, since the two forms name their columns differently.
+
+Several sections of a courier form each have a `Name` and an `Address`, so a
+repeated label is qualified by the heading it sits under —
+`PARTICULARS OF THE IMPORTER · Name` against `SUPPLIER DETAILS · Name`. A label
+that appears once is left unqualified.
+
 ## One workbook for a whole batch
 
 `--combined` writes every document given into a single file instead of one
@@ -59,8 +85,12 @@ python -m boe_extraction.cli --highlights path/to/boe.pdf -o output/
 A highlight may cover a label, its value, or both, so each is resolved by
 position against the structure the form already has: the label/value grid for
 the courier forms, the numbered tables for the ICEGATE form. A highlight over a
-heading or a table — DUTY DETAILS, PAYMENT DETAILS — has no single label and is
-reported verbatim under `(as highlighted)`.
+heading has no single label and is reported verbatim under `(as highlighted)`.
+
+A highlighted table of one row — a bold heading row over one row of figures,
+like PAYMENT DETAILS or the IGM flight block — is read as a field per column. A
+table of several rows (DUTY DETAILS) is left verbatim; its figures are already
+reported against each line item.
 
 Text under a highlight is collected by testing each word's position, not by
 cropping the page. A crop takes in the neighbouring rows and pdfplumber then

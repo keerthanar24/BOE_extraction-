@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from .excel_writer import (output_paths, safe_name, write_combined,
-                           write_highlighted, write_invoice)
+                           write_highlighted, write_invoice, write_mandatory)
 from .extract import extract, extract_document, extract_with_highlights
 
 
@@ -22,6 +22,9 @@ def build_parser():
     parser.add_argument("--combined", metavar="FILE", type=Path,
                         help="write every document given to a single workbook "
                              "instead of one per invoice")
+    parser.add_argument("--mandatory", metavar="FILE", type=Path,
+                        help="write the highlighted fields as the columns of "
+                             "the extract, one row per document and per item")
     return parser
 
 
@@ -29,7 +32,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.combined:
+    if args.combined or args.mandatory:
         return _combined(args)
 
     failures = 0
@@ -83,9 +86,13 @@ def _combined(args):
 
     if not documents:
         return 1
-    args.combined.parent.mkdir(parents=True, exist_ok=True)
-    write_combined(documents, args.combined)
-    print(f"  {args.combined}  ({len(documents)} document(s))")
+    for out_path, writer in ((args.combined, write_combined),
+                             (args.mandatory, write_mandatory)):
+        if out_path is None:
+            continue
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        writer(documents, out_path)
+        print(f"  {out_path}  ({len(documents)} document(s))")
     return 1 if failures else 0
 
 

@@ -62,13 +62,36 @@ def test_courier_highlighted_fields(courier):
     assert values["Name of Manufacturer"] == "GATI HONG KONG LIMITED"
 
 
-def test_courier_tables_are_kept_verbatim(courier):
-    """A highlight over DUTY DETAILS covers a table, which has no one label."""
+def test_multi_row_tables_are_kept_verbatim(courier):
+    """DUTY DETAILS has five rows, so it has no one value per column.
+
+    Its figures are already reported against each line item, so the highlight
+    is left as it was drawn.
+    """
     tables = [f.value for f in courier[1] if f.label == "(as highlighted)"]
     duty = next(t for t in tables if t.startswith("Sr.No. Duty Head"))
     assert "1 BCD 20 0 0 3908" in duty
-    payment = next(t for t in tables if t.startswith("Sr.No. TR-6"))
-    assert "2908387251" in payment and "45833" in payment
+    assert "5 CMPNSTRY 0 0 0 0" in duty
+
+
+def test_single_row_tables_become_fields(courier):
+    """A bold heading row over one row of figures is a record, so read it."""
+    values = _values(courier[1])
+    assert values["TR-6 Challan Number"] == "2908387251"
+    assert values["Total Amount"] == "45833"
+    assert values["Challan Date"] == "29/08/2026"
+    assert values["Airlines"] == "Indigo Airlines"
+    assert values["Flight No."] == "6E 1074"
+    assert values["Airport Of Arrival"] == "DEL"
+    assert values["Date Of Arrival"] == "27/08/2026"
+
+
+def test_sections_tell_repeated_labels_apart(courier):
+    """The importer, the supplier and the broker each have a Name."""
+    names = {f.key: f.value for f in courier[1] if f.label == "Name"}
+    assert names["PARTICULARS OF THE IMPORTER · Name"] == "VALUECART PRIVATE LIMITED"
+    assert names["SUPPLIER DETAILS · Name"] == "GATI HONG KONG LIMITED"
+    assert names["BROKER/ AGENT DETAILS · Name"] == "KBR INTERNATIONAL LOGISTICS"
 
 
 def test_standard_highlighted_summary_totals(standard):
@@ -175,3 +198,46 @@ def test_combined_totals_match_the_documents(tmp_path):
     standard = rows[STANDARD.name]
     assert standard[1] == "ICEGATE BOE"
     assert (standard[11], standard[12]) == (9, 560008)
+
+
+def test_mandatory_workbook_uses_the_fields_as_columns(tmp_path):
+    """The highlights are the required-field list, so they are the columns."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_mandatory
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(COURIER), extract_document(STANDARD)]
+    path = write_mandatory(documents, tmp_path / "mandatory.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Mandatory Fields", "Mandatory Item Fields",
+                                   "Line Items", "Field Checklist",
+                                   "Highlights (raw)"]
+
+    sheet = workbook["Mandatory Fields"]
+    assert sheet.max_row == 3                      # header plus two documents
+    header = [c.value for c in sheet[1]]
+    assert header[:3] == ["Document", "Form Type", "BE Number"]
+    for column in ["CBEXIV Number", "TR-6 Challan Number", "1.BCD",
+                   "PARTICULARS OF THE IMPORTER · Name"]:
+        assert column in header
+
+    rows = {r[0]: r for r in sheet.iter_rows(min_row=2, values_only=True)}
+    courier = rows[COURIER.name]
+    assert courier[header.index("CBEXIV Number")] == "CBEXIV_DEL_2026-2027_2808_10570"
+    assert courier[header.index("TR-6 Challan Number")] == "2908387251"
+    standard = rows[STANDARD.name]
+    assert standard[header.index("1.BCD")] == "84001.2"
+    assert standard[header.index("EXCHANGE RATE")] == "1 USD=96.05INR"
+
+
+def test_item_rows_cover_every_item_of_every_document(tmp_path):
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_mandatory
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(COURIER), extract_document(STANDARD)]
+    path = write_mandatory(documents, tmp_path / "mandatory.xlsx")
+    sheet = load_workbook(path)["Mandatory Item Fields"]
+    assert sheet.max_row == 4 + 9 + 1

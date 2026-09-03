@@ -27,7 +27,14 @@ def page_text(page):
 
 
 def page_words(page):
-    return upright_page(page).extract_words(x_tolerance=X_TOLERANCE)
+    # fontname comes along because the ICEGATE form sets its headings in bold
+    # and their values in regular, which is how the two are told apart.
+    return upright_page(page).extract_words(x_tolerance=X_TOLERANCE,
+                                            extra_attrs=["fontname"])
+
+
+def is_bold(word):
+    return "bold" in word.get("fontname", "").lower()
 
 
 def document_text(pdf):
