@@ -102,14 +102,13 @@ def write_invoice(boe, invoice, path):
 
 
 def _write_highlighted(sheet, fields):
-    sheet.append(["Page", "Field", "Value"])
+    sheet.append(["Page", "Section", "Field", "Value"])
     for field in fields:
-        sheet.append([field.page + 1, field.label, field.value])
+        sheet.append([field.page + 1, field.section, field.label, field.value])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-    sheet.column_dimensions["A"].width = 7
-    sheet.column_dimensions["B"].width = 38
-    sheet.column_dimensions["C"].width = 70
+    for column, width in zip("ABCD", (7, 46, 38, 70)):
+        sheet.column_dimensions[column].width = width
     sheet.freeze_panes = "A2"
 
 
@@ -251,17 +250,16 @@ def _write_invoices(sheet, documents):
 
 
 def _write_combined_fields(sheet, documents):
-    sheet.append(["Document", "Page", "Field", "Value"])
+    sheet.append(["Document", "Page", "Section", "Field", "Value"])
     for document in documents:
         for field in document.fields:
-            sheet.append([document.name, field.page + 1, field.label, field.value])
+            sheet.append([document.name, field.page + 1, field.section,
+                          field.label, field.value])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["B"].width = 7
-    sheet.column_dimensions["C"].width = 38
-    sheet.column_dimensions["D"].width = 66
-    sheet.freeze_panes = "C2"
+    for column, width in zip("ABCDE", (34, 7, 46, 38, 66)):
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "D2"
 
 
 def _write_combined_items(sheet, documents):

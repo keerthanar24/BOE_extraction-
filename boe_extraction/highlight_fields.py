@@ -221,6 +221,24 @@ def _qualify_repeats(fields):
     return fields
 
 
+def _use_parsed_item_values(fields, boe):
+    """Take a per-item field's value from the item the parser built.
+
+    Reading the item table by column clips a value that starts left of its own
+    heading -- "3.DESCRIPTION" begins under "2.CTH". The parser has already
+    read the row properly, so its value stands.
+    """
+    items = boe.all_items() if boe is not None else []
+    if not items:
+        return fields
+    first = items[0].details
+    for field in fields:
+        parsed = first.get(field.label)
+        if parsed:
+            field.value = parsed
+    return fields
+
+
 def collect(pdf, form_type, boe=None):
     """Every highlighted field in the document, as label/value pairs."""
     highlights = read_highlights(pdf)
@@ -230,6 +248,8 @@ def collect(pdf, form_type, boe=None):
         fields = _courier_fields(pdf, highlights)
     else:
         fields = _standard_fields(pdf, highlights, boe)
+
+    _use_parsed_item_values(fields, boe)
 
     seen, kept = set(), []
     for field in fields:

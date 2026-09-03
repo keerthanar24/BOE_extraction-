@@ -241,3 +241,13 @@ def test_item_rows_cover_every_item_of_every_document(tmp_path):
     path = write_mandatory(documents, tmp_path / "mandatory.xlsx")
     sheet = load_workbook(path)["Mandatory Item Fields"]
     assert sheet.max_row == 4 + 9 + 1
+
+
+def test_item_table_values_come_from_the_parsed_row(standard):
+    """"3.DESCRIPTION" begins under "2.CTH", so reading it by column clips it."""
+    values = _values(standard[1])
+    assert values["2.CTH"] == "39269099"
+    assert values["3.DESCRIPTION"] == "X002HTKLZJ MACBOOK PRO 16 INCH CASE - PC"
+    assert values["4.UNIT PRICE"] == "4.62"
+    assert values["5.QUANTITY"] == "40"
+    assert values["7.AMOUNT"] == "184.8"
