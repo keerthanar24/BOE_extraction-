@@ -15,6 +15,34 @@ FBA15M6L9KGF01_courier_cbe_xiv.pdf: CBE-XIV, BE CBEXIV_DEL_2026-2027_2808_10570,
   output/BOE__FBA15M6L9KGF01__extracted.xlsx  (4 rows, assessable 104,220.00, duty 45,814.00)
 ```
 
+## Extracting what a reviewer highlighted
+
+The marked-up documents carry PDF highlight annotations over the fields that
+should be extracted. `--highlights` reads them and writes one workbook per
+document:
+
+```bash
+python -m boe_extraction.cli --highlights path/to/boe.pdf -o output/
+```
+
+| Sheet | What it holds |
+| --- | --- |
+| Highlighted Fields | Every highlight resolved to a field and its value |
+| Line Items | The 20 standard columns, every item of every invoice |
+| Item Details | The highlighted per-item fields, for all items — a field highlighted on item 1 is wanted for all of them |
+| Highlights (raw) | The highlighted text verbatim, so nothing is lost to a mis-resolution |
+
+A highlight may cover a label, its value, or both, so each is resolved by
+position against the structure the form already has: the label/value grid for
+the courier forms, the numbered tables for the ICEGATE form. A highlight over a
+heading or a table — DUTY DETAILS, PAYMENT DETAILS — has no single label and is
+reported verbatim under `(as highlighted)`.
+
+Text under a highlight is collected by testing each word's position, not by
+cropping the page. A crop takes in the neighbouring rows and pdfplumber then
+merges them into one line, so "Port Code" over "INNSA1" comes back as
+"IPNoNrtS CAo1d".
+
 ## Which forms it reads
 
 The form is identified from the text on page 1 — nothing depends on the file
@@ -91,3 +119,6 @@ python -m pytest tests -q
   duty, so a blank in the source does not become a zero in the output — but it
   is the one figure worth spot-checking on an unfamiliar document format.
 - It is a script run on demand, not a scheduled job or a screen.
+- Two ICEGATE blocks print their heading indented over a wider cell than the
+  value beneath it (`1.IMPORTER NAME & ADDRESS`, `3.SUPPLIER NAME & ADDRESS`).
+  The column reader clips those, so their values come from the parser instead.

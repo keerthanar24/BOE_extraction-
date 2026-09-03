@@ -126,6 +126,7 @@ def _parse_item(section, number, lines, next_start):
         setattr(item, f"{head}_rate", rate)
         setattr(item, f"{head}_amount", amount)
 
+    item.details = {label: _clean(value) for label, value in section.by_label.items()}
     item.backfill_bcd()
     item.duty_amount = item.total_duty()
     return item

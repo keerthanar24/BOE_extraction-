@@ -101,6 +101,101 @@ def write_invoice(boe, invoice, path):
     return path
 
 
+def _write_highlighted(sheet, fields):
+    sheet.append(["Page", "Field", "Value"])
+    for field in fields:
+        sheet.append([field.page + 1, field.label, field.value])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.column_dimensions["A"].width = 7
+    sheet.column_dimensions["B"].width = 38
+    sheet.column_dimensions["C"].width = 70
+    sheet.freeze_panes = "A2"
+
+
+def _write_raw_highlights(sheet, highlights):
+    sheet.append(["Page", "Highlighted text"])
+    for highlight in highlights:
+        sheet.append([highlight.page + 1, highlight.text])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    sheet.column_dimensions["A"].width = 7
+    sheet.column_dimensions["B"].width = 110
+    sheet.freeze_panes = "A2"
+
+
+def _write_all_items(sheet, boe):
+    sheet.append(["Invoice"] + [title for _, title in ITEM_COLUMNS])
+    for invoice in boe.invoices:
+        for item in invoice.items:
+            sheet.append([invoice.number]
+                         + [getattr(item, field) for field, _ in ITEM_COLUMNS])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.column_dimensions["A"].width = 18
+    for index, (_, title) in enumerate(ITEM_COLUMNS, start=2):
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
+        if title in MONEY_COLUMNS:
+            for row in range(2, sheet.max_row + 1):
+                sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "B2"
+
+
+def _highlighted_item_labels(boe, fields):
+    """Highlighted labels that name a per-item field.
+
+    A field highlighted on one item is a request for that field on every item,
+    so any highlighted label the items themselves carry is reported for all of
+    them.
+    """
+    items = boe.all_items()
+    # Keep a label only where at least one item actually carries a value, so a
+    # document-level label that happens to share a name adds no empty column.
+    carried = {label for item in items for label, value in item.details.items() if value}
+    labels = []
+    for field in fields:
+        if field.label in carried and field.label not in labels:
+            labels.append(field.label)
+    return labels
+
+
+def _write_item_details(sheet, boe, labels):
+    sheet.append(["Invoice", "Item Number"] + labels)
+    for invoice in boe.invoices:
+        for item in invoice.items:
+            sheet.append([invoice.number, item.item_number]
+                         + [item.details.get(label, "") for label in labels])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.column_dimensions["A"].width = 18
+    sheet.column_dimensions["B"].width = 12
+    for index in range(3, len(labels) + 3):
+        sheet.column_dimensions[get_column_letter(index)].width = 28
+    sheet.freeze_panes = "C2"
+
+
+def write_highlighted(boe, fields, highlights, path):
+    """One workbook holding everything the reviewer highlighted.
+
+    The resolved fields are the working sheet; the raw sheet records the
+    highlighted text verbatim so nothing is lost to a mis-resolution.
+    """
+    workbook = Workbook()
+    resolved = workbook.active
+    resolved.title = "Highlighted Fields"
+    _write_highlighted(resolved, fields)
+    _write_all_items(workbook.create_sheet("Line Items"), boe)
+    labels = _highlighted_item_labels(boe, fields)
+    if labels:
+        _write_item_details(workbook.create_sheet("Item Details"), boe, labels)
+    _write_raw_highlights(workbook.create_sheet("Highlights (raw)"), highlights)
+    workbook.save(path)
+    return path
+
+
 def output_paths(boe, output_dir, stem=None):
     """The workbook path for each invoice in the document."""
     paths = []

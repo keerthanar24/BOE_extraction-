@@ -29,6 +29,13 @@ ITEM_COLUMNS = [
 
 @dataclass
 class LineItem:
+    """One line of the bill.
+
+    ``details`` holds every other field the form carries for this item, keyed
+    by the form's own label, so a document can be asked for a field the 20
+    standard columns do not cover.
+    """
+
     item_number: int
     hs_code: str = ""
     description: str = ""
@@ -48,6 +55,7 @@ class LineItem:
     cess_amount: Optional[float] = None
     duty_amount: Optional[float] = None
     exchange_rate: Optional[float] = None
+    details: dict = field(default_factory=dict)
 
     def backfill_bcd(self):
         """Recover a BCD amount the table reader dropped.
