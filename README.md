@@ -106,6 +106,7 @@ name.
 | --- | --- | --- |
 | CBE-XIV — ECCS courier BOE | Direct parse of the PDF text layer | Free |
 | CBE-XIII — ECCS courier BOE | Direct parse of the PDF text layer | Free |
+| | *lists items flat under `ITEM :`, with no invoice sections* | |
 | ICEGATE BOE (Parts I–III) | Direct parse of the PDF text layer | Free |
 
 All three paths are deterministic: the same input always produces the same

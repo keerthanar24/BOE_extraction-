@@ -126,3 +126,52 @@ def test_workbook_matches_the_established_column_layout(tmp_path, courier):
         "Duty Amount", "Exchange Rate"]
     assert sheet.max_row == 5
     assert sheet["A2"].value is True
+
+
+CBE_XIII = SAMPLES / "FBA15M1ZPS2Y01_courier_cbe_xiii.pdf"
+
+
+@pytest.fixture(scope="module")
+def cbe_xiii():
+    return extract(CBE_XIII)
+
+
+def test_cbe_xiii_is_identified_and_read(cbe_xiii):
+    """This form lists items flat under "ITEM :", with no invoice sections."""
+    assert cbe_xiii.form_type == "CBE-XIII"
+    assert cbe_xiii.importer_name == "VALUECART PRIVATE LIMITED"
+    assert cbe_xiii.iec == "AAFCV5265N"
+    assert cbe_xiii.gstin == "29AAFCV5265N1ZK"
+    assert cbe_xiii.exchange_rate == 97.2
+    assert len(cbe_xiii.all_items()) == 44
+
+
+def test_cbe_xiii_groups_items_into_their_invoice(cbe_xiii):
+    (invoice,) = cbe_xiii.invoices
+    assert invoice.number == "FBA15M1ZPS2Y01"
+    assert invoice.supplier == "GATI HONG KONG LIMITED"
+    assert len(invoice.items) == 44
+
+
+def test_cbe_xiii_line_items(cbe_xiii):
+    first = cbe_xiii.all_items()[0]
+    assert first.hs_code == "42023290"
+    assert first.description == "X002447XTT Meta Ray-Ban Glasses Carrying Case"
+    assert (first.quantity, first.unit_of_measure, first.unit_price) == (7, "PCS", 4.18)
+    assert first.assessable_value == 2844.07
+    assert (first.bcd_rate, first.bcd_amount) == (15, 427)
+    assert (first.sws_rate, first.sws_amount) == (10, 43)
+    assert (first.igst_rate, first.igst_amount) == (18, 596)
+    assert first.duty_amount == 1066
+
+
+def test_cbe_xiii_reconciles_with_its_own_header(cbe_xiii):
+    """The form prints the consignment's assessable value and duty on page 1."""
+    items = cbe_xiii.all_items()
+    assert sum(i.assessable_value for i in items) == pytest.approx(82062.07, abs=0.01)
+    assert sum(i.duty_amount for i in items) == pytest.approx(29648, abs=0.5)
+
+
+def test_a_quantity_is_not_lost_to_a_colonless_label(cbe_xiii):
+    """"Marks on Packages 0" used to swallow the "Quantity : 7" beside it."""
+    assert all(item.quantity is not None for item in cbe_xiii.all_items())
