@@ -295,3 +295,18 @@ def test_a_value_wrapped_onto_a_second_line_is_joined(standard):
     assert values["8.HAWB NO"] == "GATI26SE0725"
     # A wrapped phrase keeps its space rather than joining up closed.
     assert values["2.CB NAME"] == "INTERLINK SHIPPING & CLEARING"
+
+
+def test_a_wrapped_heading_is_not_read_as_values(standard):
+    """"7.ADV BE 11.FIRST 12. PROV/" wraps onto "(Y/N/P) CHECK FINAL".
+
+    Both lines are heading; the values are further down. Reading the wrapped
+    line as values turned the flag "N" into "CHECKN".
+    """
+    values = _values(standard[1])
+    assert values["11.FIRST"] == "N"
+    assert values["12. PROV/"] == "F"
+    assert values["1.BE STATUS"] == "FIRST COPY"
+    # A heading whose value sits beside it still resolves.
+    assert values["15.PORT OF LOADING"] == "Shekou"
+    assert values["16.PORT OF SHIPMENT"] == "Shekou"

@@ -160,12 +160,21 @@ def _value_lines(lines, index, heading):
     for line in lines[index + 1:]:
         top = line[0]["top"]
         if not collected:
+            if top < bottom - 2:
+                continue           # still level with the heading itself
             if top > bottom + VALUE_LINE_GAP:
                 break
-            if top < bottom - 2:
+            if _is_heading(line):
+                break              # the values are printed beside the heading
+            # The form sets headings in bold, so a wholly bold line that heads
+            # nothing is the heading wrapping -- "7.ADV BE 11.FIRST 12. PROV/"
+            # over "(Y/N/P) CHECK FINAL" -- and the values are further down.
+            if all(is_bold(w) for w in line):
                 continue
             collected.append(line)
             continue
+        if all(is_bold(w) for w in line):
+            break
         # A continuation sits just below the line before it and heads nothing.
         previous = max(w["bottom"] for w in collected[-1])
         if top > previous + CONTINUATION_GAP or _is_heading(line):
