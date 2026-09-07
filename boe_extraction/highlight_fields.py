@@ -19,6 +19,8 @@ from .icegate_tables import read_tables
 from .pdf_text import is_bold, upright_page, word_lines
 
 PART_HEADING = re.compile(r"^PART - [IVX]+ - .+")
+# What opens an item on a courier form: CBE-XIV numbers them, CBE-XIII does not.
+ITEM_BLOCK = re.compile(r"^(?:Details\s+Of\s+Item\s*-\s*\d+|ITEM\s*:)$", re.IGNORECASE)
 # The narrowest gap between two columns of one of the forms' small tables.
 TABLE_COLUMN_GAP = 20
 
@@ -221,23 +223,48 @@ def _qualify_repeats(fields):
     return fields
 
 
-def _use_parsed_item_values(fields, boe):
+def _item_blocks(pdf, boe):
+    """Where each item's block starts, paired with the item itself.
+
+    A courier form opens every item with a marker, so a highlight can be placed
+    in the item it actually sits in.
+    """
+    starts = [(e.page, e.top) for e in read_entries(pdf)
+              if isinstance(e, Marker) and ITEM_BLOCK.match(e.text)]
+    return list(zip(starts, boe.all_items()))
+
+
+def _item_at(blocks, field):
+    """The item whose block a field falls inside, if any."""
+    found = None
+    for start, item in blocks:
+        if (field.page, field.top) >= start:
+            found = item
+        else:
+            break
+    return found
+
+
+def _use_parsed_item_values(fields, boe, blocks):
     """Repair a per-item field's value from the item the parser built.
 
     Reading the item table by column clips a value that starts left of its own
     heading -- "3.DESCRIPTION" begins under "2.CTH". The parser has already
     read the row properly, so its value stands.
 
-    Only a value that was actually read is repaired. A field the form left
-    blank stays blank: a courier form carries a Country of Origin at document
-    level as well as on each item, and an empty one must not borrow the item's.
+    Only a field sitting inside an item's own block is repaired, and only from
+    that item. A courier form carries an Assessable Value and a Country of
+    Origin at document level as well as on every item, and the consignment's
+    total must not be replaced by the first item's share of it.
     """
     items = boe.all_items() if boe is not None else []
     if not items:
         return fields
-    first = items[0].details
     for field in fields:
-        parsed = first.get(field.label)
+        item = _item_at(blocks, field) if blocks else items[0]
+        if item is None:
+            continue
+        parsed = item.details.get(field.label)
         if parsed and field.value:
             field.value = parsed
     return fields
@@ -253,7 +280,10 @@ def collect(pdf, form_type, boe=None):
     else:
         fields = _standard_fields(pdf, highlights, boe)
 
-    _use_parsed_item_values(fields, boe)
+    # An ICEGATE form has no item markers; its item-table labels are distinct
+    # from its document-level ones, so the first item is the right source.
+    blocks = _item_blocks(pdf, boe) if boe is not None and not form_type.startswith("ICEGATE") else []
+    _use_parsed_item_values(fields, boe, blocks)
 
     seen, kept = set(), []
     for field in fields:

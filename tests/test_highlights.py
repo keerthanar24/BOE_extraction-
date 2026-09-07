@@ -258,3 +258,31 @@ def test_a_blank_field_does_not_borrow_an_item_value(courier):
     origins = {f.key: f.value for f in courier[1] if f.label == "Country of Origin"}
     assert origins["SPECIAL REQUESTS · Country of Origin"] == ""
     assert origins["DETAILED DESCRIPTION OF ITEM · Country of Origin"] == "CHINA"
+
+
+CBE_XIII_HIGHLIGHTED = SAMPLES / "FBA15M1ZPS2Y01_cbe_xiii_highlighted.pdf"
+
+
+def test_highlights_resolve_on_a_cbe_xiii():
+    """The highlight path had only ever run on the other two forms."""
+    boe, fields, highlights = extract_with_highlights(CBE_XIII_HIGHLIGHTED)
+    assert boe.form_type == "CBE-XIII"
+    assert len(highlights) == 9
+    values = _values(fields)
+    assert values["Import Export Code"] == "AAFCV5265N"
+    assert values["KYC ID"] == "29AAFCV5265N1ZK"
+    assert values["CTSH"] == "42023290"
+    assert values["Description of Goods"] == "X002447XTT Meta Ray-Ban Glasses Carrying Case"
+    assert values["Quantity"] == "7"
+
+
+def test_a_document_total_is_not_replaced_by_an_items_share():
+    """A courier form carries an Assessable Value at both levels.
+
+    The consignment's total must survive; only a field inside an item's own
+    block may be repaired from that item.
+    """
+    _, fields, _ = extract_with_highlights(CBE_XIII_HIGHLIGHTED)
+    values = _values(fields)
+    assert values["Assessable Value"] == "82062.07"   # not item 1's 2844.07
+    assert values["Duty(Rs.)"] == "29648"             # not item 1's 1066
