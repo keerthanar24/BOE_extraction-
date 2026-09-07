@@ -4,3 +4,4 @@ output/
 .pytest_cache/
 example_output/
 *.zip
+validation_report.txt
