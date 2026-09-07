@@ -6,7 +6,9 @@ from pathlib import Path
 
 from .excel_writer import (output_paths, safe_name, write_combined,
                            write_highlighted, write_invoice, write_mandatory)
-from .extract import extract, extract_document, extract_with_highlights
+from .extract import (extract, extract_document, extract_with_highlights,
+                      verify_document)
+from .verify import report
 
 
 def build_parser():
@@ -25,12 +27,18 @@ def build_parser():
     parser.add_argument("--mandatory", metavar="FILE", type=Path,
                         help="write the highlighted fields as the columns of "
                              "the extract, one row per document and per item")
+    parser.add_argument("--verify", action="store_true",
+                        help="check the extraction against the counts and "
+                             "totals each document declares, and write nothing")
     return parser
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.verify:
+        return _verify(args)
 
     if args.combined or args.mandatory:
         return _combined(args)
@@ -50,6 +58,10 @@ def main(argv=None):
         items = boe.all_items()
         print(f"{pdf_path.name}: {boe.form_type}, BE {boe.be_number}, "
               f"{len(boe.invoices)} invoice(s), {len(items)} line item(s)")
+        if not items:
+            print(f"{pdf_path}: the form was recognised but no line items were "
+                  f"extracted", file=sys.stderr)
+            failures += 1
 
         if args.highlights:
             name = safe_name(boe.be_number or pdf_path.stem)
@@ -65,6 +77,29 @@ def main(argv=None):
             duty = round(sum(i.duty_amount or 0 for i in invoice.items), 2)
             print(f"  {out_path}  ({len(invoice.items)} rows, "
                   f"assessable {total:,.2f}, duty {duty:,.2f})")
+    return 1 if failures else 0
+
+
+def _verify(args):
+    """Check each document against what it says about itself."""
+    failures = 0
+    for pdf_path in args.pdfs:
+        try:
+            boe, checks = verify_document(pdf_path)
+        except Exception as error:  # a bad document must not stop the batch
+            print(f"{pdf_path}: {error}", file=sys.stderr)
+            failures += 1
+            continue
+
+        items = boe.all_items()
+        print(f"{pdf_path.name}: {boe.form_type}, BE {boe.be_number}, "
+              f"{len(boe.invoices)} invoice(s), {len(items)} line item(s)")
+        lines, passed = report(checks, boe.form_type)
+        for line in lines:
+            print(line)
+        print("  => " + ("all checks passed" if passed else "CHECKS FAILED"))
+        if not passed:
+            failures += 1
     return 1 if failures else 0
 
 

@@ -54,6 +54,15 @@ def extract_document(path, with_highlights=True):
     return Document(Path(path).name, boe, fields, highlights)
 
 
+def verify_document(path):
+    """Parse a document and check it against the totals it declares."""
+    from .verify import verify
+
+    with pdfplumber.open(str(path)) as pdf:
+        _, boe = _parse(pdf, path)
+        return boe, verify(pdf, boe)
+
+
 def extract_with_highlights(path):
     """Parse the document and resolve the highlights drawn on it.
 

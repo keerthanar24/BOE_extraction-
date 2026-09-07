@@ -153,7 +153,45 @@ Beyond that the two families need different readers:
   splitting on whitespace: empty cells collapse, so `Rate 15 10 18 0 0` only
   says which duties were charged once each figure sits under its own heading.
 
-## Verifying a run
+## Verifying a run against the document itself
+
+`--verify` checks an extraction against the figures the document states about
+itself, and writes nothing:
+
+```bash
+python -m boe_extraction.cli --verify path/to/boe.pdf
+```
+
+```
+BOE_3141398_icegate.pdf: ICEGATE BOE, BE 3141398, 2 invoice(s), 9 line item(s)
+  [PASS] Invoice count: document says 2, extracted 2
+  [PASS] Item count: document says 9, extracted 9
+  [PASS] Assessable value: document says 560008.0, extracted 560008.0
+  ...
+  => all checks passed
+```
+
+It exits non-zero if any check fails, so it can gate a batch.
+
+Those declarations are independent of how the line items were read, which is
+what makes agreeing with them evidence. How much can be checked differs by
+form, and the report says so rather than implying a clean bill:
+
+| Form | What the document declares about itself |
+| --- | --- |
+| ICEGATE | Invoice and item counts, and the duty summary totals |
+| CBE-XIII | Its assessable value and total duty |
+| CBE-XIV | Nothing — only internal consistency can be checked |
+
+Every form also gets the checks that need no declared figure: an item's
+assessable value equalling unit price x quantity x exchange rate, its duty
+amount equalling the sum of its duty heads, and no item left without a
+description.
+
+A recognised form that yields no line items is a failure, not an empty
+document: both `--verify` and an ordinary run report it and exit non-zero.
+
+## Verifying the parsers
 
 `tests/test_extraction.py` runs both sample documents end to end and checks the
 extracted rows against the totals the document prints for itself — for the

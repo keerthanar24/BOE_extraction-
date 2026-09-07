@@ -175,3 +175,42 @@ def test_cbe_xiii_reconciles_with_its_own_header(cbe_xiii):
 def test_a_quantity_is_not_lost_to_a_colonless_label(cbe_xiii):
     """"Marks on Packages 0" used to swallow the "Quantity : 7" beside it."""
     assert all(item.quantity is not None for item in cbe_xiii.all_items())
+
+
+def _verify(path):
+    from boe_extraction.extract import verify_document
+    return verify_document(path)[1]
+
+
+def test_icegate_verifies_against_its_declared_counts_and_totals():
+    """Page 1 states the counts and the duty summary; both must agree."""
+    checks = {c.name: c for c in _verify(STANDARD)}
+    assert checks["Invoice count"].declared == 2
+    assert checks["Item count"].declared == 9
+    assert all(c.ok for c in checks.values())
+
+
+def test_cbe_xiii_verifies_against_its_declared_totals():
+    checks = {c.name: c for c in _verify(CBE_XIII)}
+    assert checks["Assessable value"].declared == 82062.07
+    assert checks["Total duty"].declared == 29648
+    assert all(c.ok for c in checks.values())
+
+
+def test_cbe_xiv_has_no_declared_totals_to_check():
+    """This form states no totals, so only consistency checks are possible."""
+    names = {c.name for c in _verify(COURIER)}
+    assert "Assessable value" not in names
+    assert "Assessable value = price x quantity x rate" in names
+    assert all(c.ok for c in _verify(COURIER))
+
+
+def test_an_extraction_of_nothing_fails_verification():
+    """A recognised form yielding no items must not be reported as success."""
+    from boe_extraction.model import BillOfEntry
+    from boe_extraction.verify import verify
+
+    empty = BillOfEntry(form_type="CBE-XIII")
+    (check,) = verify(None, empty)
+    assert check.name == "Line items found"
+    assert check.ok is False
