@@ -286,3 +286,12 @@ def test_a_document_total_is_not_replaced_by_an_items_share():
     values = _values(fields)
     assert values["Assessable Value"] == "82062.07"   # not item 1's 2844.07
     assert values["Duty(Rs.)"] == "29648"             # not item 1's 1066
+
+
+def test_a_value_wrapped_onto_a_second_line_is_joined(standard):
+    """The MAWB number is printed as "ONEYSZPGM" over "8034800"."""
+    values = _values(standard[1])
+    assert values["6.MAWB NO"] == "ONEYSZPGM8034800"
+    assert values["8.HAWB NO"] == "GATI26SE0725"
+    # A wrapped phrase keeps its space rather than joining up closed.
+    assert values["2.CB NAME"] == "INTERLINK SHIPPING & CLEARING"

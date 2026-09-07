@@ -20,6 +20,8 @@ from .pdf_text import is_bold, upright_page, word_lines
 NUMBERED = re.compile(r"^\d{1,2}\.(?!\d)")
 # The value line sits within this many points below its heading line.
 VALUE_LINE_GAP = 14
+# A wrapped continuation follows within this many points of the line above it.
+CONTINUATION_GAP = 4
 # The narrowest gap that separates a heading from a value beside it. The form
 # sets both in the same run, so the break is only a couple of points wider than
 # the spacing between words.
@@ -71,6 +73,25 @@ class Column:
 
 def _text(words):
     return " ".join(w["text"] for w in words)
+
+
+def _join_rows(rows):
+    """Join a value's lines, concatenating one that was split mid-token.
+
+    "ONEYSZPGM" over "8034800" is one MAWB number, so it joins up closed. A
+    wrapped phrase -- an address over two lines -- keeps its space.
+    """
+    joined = ""
+    for row in rows:
+        if not row:
+            continue
+        if not joined:
+            joined = row
+        elif " " in joined.strip() or " " in row.strip():
+            joined += " " + row
+        else:
+            joined += row
+    return joined.strip()
 
 
 def _set_bounds(columns):
@@ -127,15 +148,36 @@ def _separate(numbered, bare):
     return [c for c in numbered if c.words], kept
 
 
-def _value_line(lines, index, heading):
-    """The line of values under a heading line, if there is one."""
+def _value_lines(lines, index, heading):
+    """The value lines under a heading, including wrapped continuations.
+
+    A long value runs onto a second line within its own column -- an MAWB
+    number is printed as "ONEYSZPGM" over "8034800" and means
+    "ONEYSZPGM8034800". Taking only the first line truncates it.
+    """
     bottom = max(w["bottom"] for w in heading)
+    collected = []
     for line in lines[index + 1:]:
-        if line[0]["top"] > bottom + VALUE_LINE_GAP:
-            return []
-        if line[0]["top"] >= bottom - 2:
-            return line
-    return []
+        top = line[0]["top"]
+        if not collected:
+            if top > bottom + VALUE_LINE_GAP:
+                break
+            if top < bottom - 2:
+                continue
+            collected.append(line)
+            continue
+        # A continuation sits just below the line before it and heads nothing.
+        previous = max(w["bottom"] for w in collected[-1])
+        if top > previous + CONTINUATION_GAP or _is_heading(line):
+            break
+        collected.append(line)
+    return collected
+
+
+def _value_line(lines, index, heading):
+    """The first line of values under a heading, if there is one."""
+    found = _value_lines(lines, index, heading)
+    return found[0] if found else []
 
 
 def _is_heading(line):
@@ -173,27 +215,32 @@ def read_tables(pdf):
             if not columns and not bare:
                 continue
 
-            below = _value_line(lines, index, line)
+            rows = _value_lines(lines, index, line)
             # A heading line below means the values are printed inline.
-            if below and _is_heading(below):
-                below = []
+            if rows and _is_heading(rows[0]):
+                rows = []
+            below = [w for row in rows for w in row]
 
             top = line[0]["top"]
             bottom = max([w["bottom"] for w in below] or
                          [w["bottom"] for w in line])
+
+            def under(column):
+                """The column's value, with any wrapped line joined back on."""
+                return _join_rows([_text([w for w in row if column.holds(w)])
+                                   for row in rows])
 
             for column in columns:
                 # Only read a value from beside the heading when there is no
                 # value line under it; otherwise the heading's own trailing
                 # words would be mistaken for the value.
                 label, inline = (_text(column.words), "") if below else column.split()
-                value = inline or _text([w for w in below if column.holds(w)])
-                pairs.append(Pair(page_index, label, value, top, bottom,
-                                  column.x0, column.until))
+                pairs.append(Pair(page_index, label, inline or under(column),
+                                  top, bottom, column.x0, column.until))
 
             for column in bare:
                 beside = [w for w in column.rest if column.holds(w)]
-                value = _text(beside) or _text([w for w in below if column.holds(w)])
-                pairs.append(Pair(page_index, column.label, value, top, bottom,
-                                  column.x0, column.until))
+                pairs.append(Pair(page_index, column.label,
+                                  _text(beside) or under(column),
+                                  top, bottom, column.x0, column.until))
     return pairs
