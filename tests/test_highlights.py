@@ -17,6 +17,7 @@ from boe_extraction.highlights import read as read_highlights
 SAMPLES = Path(__file__).resolve().parents[1] / "samples"
 COURIER = SAMPLES / "FBA15M6L9KGF01_courier_cbe_xiv.pdf"
 STANDARD = SAMPLES / "BOE_3141398_icegate.pdf"
+XIII = SAMPLES / "FBA15M1ZPS2Y01_cbe_xiii_highlighted.pdf"
 
 
 @pytest.fixture(scope="module")
@@ -327,3 +328,63 @@ def test_a_wrapped_heading_is_not_read_as_values(standard):
     # A heading whose value sits beside it still resolves.
     assert values["15.PORT OF LOADING"] == "Shekou"
     assert values["16.PORT OF SHIPMENT"] == "Shekou"
+
+
+def test_one_workbook_gives_each_document_its_own_sheets(tmp_path):
+    """A run may share a file, but never a sheet."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_workbook
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(COURIER), extract_document(STANDARD)]
+    path = write_workbook(documents, tmp_path / "by_document.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == [
+        "FBA15M6L9KGF01 Fields", "FBA15M6L9KGF01 Line Items",
+        "FBA15M6L9KGF01 Highlights",
+        "3141398 Fields", "3141398 Line Items", "3141398 Highlights"]
+
+    # No sheet names a document, because no sheet holds more than one.
+    for name in workbook.sheetnames:
+        assert workbook[name]["A1"].value != "Document"
+    assert workbook["FBA15M6L9KGF01 Line Items"].max_row == 5      # 4 items
+    assert workbook["3141398 Line Items"].max_row == 10            # 9 items
+    assert workbook["FBA15M6L9KGF01 Highlights"].max_row == 56
+    assert workbook["3141398 Highlights"].max_row == 85
+
+
+def test_per_invoice_sheets_split_a_multi_invoice_document(tmp_path):
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_workbook
+    from boe_extraction.extract import extract_document
+
+    path = write_workbook([extract_document(STANDARD)],
+                          tmp_path / "by_invoice.xlsx", per_invoice=True)
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == [
+        "FBA15M13GSD3 Fields", "FBA15M13GSD3 Line Items",
+        "FBA15M13GSD3 Highlights",
+        "FBA15M16XHDH Fields", "FBA15M16XHDH Line Items",
+        "FBA15M16XHDH Highlights"]
+    assert workbook["FBA15M13GSD3 Line Items"].max_row == 6        # 5 items
+    assert workbook["FBA15M16XHDH Line Items"].max_row == 5        # 4 items
+    # Each invoice's sheet stands alone, so it need not name the invoice.
+    for name in ("FBA15M13GSD3 Line Items", "FBA15M16XHDH Line Items"):
+        assert workbook[name]["A1"].value == "Item Number"
+
+
+def test_a_sheet_name_stays_within_the_excel_limit(tmp_path):
+    """The courier BE numbers are longer than Excel allows in a sheet name."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import SHEET_NAME_LIMIT, write_workbook
+    from boe_extraction.extract import extract_document
+
+    documents = [extract_document(p) for p in (COURIER, XIII, STANDARD)]
+    path = write_workbook(documents, tmp_path / "all.xlsx")
+    names = load_workbook(path).sheetnames
+    assert len(names) == len(set(names))
+    for name in names:
+        assert len(name) <= SHEET_NAME_LIMIT

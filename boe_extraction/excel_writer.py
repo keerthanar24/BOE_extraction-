@@ -427,6 +427,68 @@ def write_all_fields(boe, document_fields, path):
     return path
 
 
+# Excel caps a sheet name at 31 characters, and " Highlights" is the longest
+# suffix a group uses.
+SHEET_NAME_LIMIT = 31
+SHEET_SUFFIXES = (" Fields", " Line Items", " Highlights")
+
+
+def _unit_label(document, invoice, taken):
+    """A short name for the sheets of one document, or of one of its invoices.
+
+    The invoice number names the unit where it can -- it is short and it is
+    what the reader recognises -- and the BE number stands in when a document
+    carries several invoices that this workbook does not split.
+    """
+    room = SHEET_NAME_LIMIT - max(len(s) for s in SHEET_SUFFIXES)
+    if invoice is not None:
+        base = invoice.number
+    elif len(document.boe.invoices) == 1:
+        base = document.boe.invoices[0].number
+    else:
+        base = document.boe.be_number
+    base = safe_name(base or document.name, document.name)[:room].strip()
+    label, index = base, 1
+    while label in taken:
+        index += 1
+        suffix = f" {index}"
+        label = base[:room - len(suffix)].strip() + suffix
+    taken.add(label)
+    return label
+
+
+def _units(documents, per_invoice):
+    """Each document, or each of its invoices, with the label its sheets take."""
+    taken, units = set(), []
+    for document in documents:
+        invoices = document.boe.invoices if per_invoice else [None]
+        for invoice in invoices:
+            units.append((document, invoice, _unit_label(document, invoice, taken)))
+    return units
+
+
+def write_workbook(documents, path, per_invoice=False):
+    """One workbook for a run, with every document on its own sheets.
+
+    Nothing is combined: a sheet only ever holds one bill of entry, and with
+    per_invoice only one invoice of it. The sheet name says which.
+    """
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    for document, invoice, label in _units(documents, per_invoice):
+        _write_highlighted(workbook.create_sheet(f"{label} Fields"),
+                           document.fields)
+        items = workbook.create_sheet(f"{label} Line Items")
+        if invoice is None:
+            _write_document_items(items, document)
+        else:
+            _write_invoice_items(items, invoice)
+        _write_raw_highlights(workbook.create_sheet(f"{label} Highlights"),
+                              document.highlights)
+    workbook.save(path)
+    return path
+
+
 def output_paths(boe, output_dir, stem=None):
     """The workbook path for each invoice in the document."""
     paths = []

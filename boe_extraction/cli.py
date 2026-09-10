@@ -4,9 +4,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from .excel_writer import (output_paths, safe_name, write_all_fields,
                            write_highlighted, write_invoice,
-                           write_invoice_highlighted, write_mandatory)
+                           write_invoice_highlighted, write_mandatory,
+                           write_workbook)
 from .extract import (document_fields, extract, extract_document,
                       extract_with_highlights, verify_document)
 from .verify import report
@@ -22,6 +25,9 @@ def build_parser():
     parser.add_argument("--highlights", action="store_true",
                         help="extract what a reviewer highlighted on the PDF "
                              "into one workbook per document")
+    parser.add_argument("--workbook", metavar="FILE", type=Path,
+                        help="write every document given to one workbook, "
+                             "each on its own sheets rather than sharing them")
     parser.add_argument("--mandatory", action="store_true",
                         help="write the highlighted fields as the columns of "
                              "the extract, one workbook per document")
@@ -55,6 +61,9 @@ def main(argv=None):
                   f"{len(boe.all_items())} line item(s)")
             print(f"  {out}")
         return 0
+
+    if args.workbook:
+        return _workbook(args)
 
     if args.mandatory:
         return _mandatory(args)
@@ -123,6 +132,32 @@ def _verify(args):
         print("  => " + ("all checks passed" if passed else "CHECKS FAILED"))
         if not passed:
             failures += 1
+    return 1 if failures else 0
+
+
+def _workbook(args):
+    """One workbook for the run, with a sheet group per document."""
+    documents, failures = [], 0
+    for pdf_path in args.pdfs:
+        try:
+            document = extract_document(pdf_path, with_highlights=True)
+        except Exception as error:  # a bad document must not stop the batch
+            print(f"{pdf_path}: {error}", file=sys.stderr)
+            failures += 1
+            continue
+        documents.append(document)
+        boe = document.boe
+        print(f"{pdf_path.name}: {boe.form_type}, BE {boe.be_number}, "
+              f"{len(boe.invoices)} invoice(s), {len(boe.all_items())} line "
+              f"item(s), {len(document.highlights)} highlight(s)")
+
+    if not documents:
+        return 1
+    args.workbook.parent.mkdir(parents=True, exist_ok=True)
+    write_workbook(documents, args.workbook, args.per_invoice)
+    print(f"  {args.workbook}")
+    for name in load_workbook(args.workbook).sheetnames:
+        print(f"    {name}")
     return 1 if failures else 0
 
 
