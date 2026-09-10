@@ -467,6 +467,38 @@ def _real_labels(items):
     return labels
 
 
+def _write_invoice_items(sheet, invoice):
+    sheet.append([title for _, title in ITEM_COLUMNS])
+    for item in invoice.items:
+        sheet.append([getattr(item, name) for name, _ in ITEM_COLUMNS])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index, (_, title) in enumerate(ITEM_COLUMNS, start=1):
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
+        if title in MONEY_COLUMNS:
+            for row in range(2, sheet.max_row + 1):
+                sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "A2"
+
+
+def write_invoice_highlighted(boe, invoice, fields, highlights, path):
+    """One workbook for a single invoice of a document.
+
+    A bill carrying several invoices is reported one invoice at a time, so its
+    line items are not merged into a single sheet.
+    """
+    workbook = Workbook()
+    resolved = workbook.active
+    resolved.title = "Highlighted Fields"
+    _write_highlighted(resolved, fields)
+    _write_invoice_items(workbook.create_sheet("Line Items"), invoice)
+    _write_raw_highlights(workbook.create_sheet("Highlights (raw)"), highlights)
+    workbook.save(path)
+    return path
+
+
 def write_all_fields(boe, document_fields, path):
     """Every field the document carries, whether highlighted or not."""
     workbook = Workbook()

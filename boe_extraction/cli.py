@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .excel_writer import (output_paths, safe_name, write_combined,
                            write_all_fields, write_highlighted, write_invoice,
-                           write_mandatory)
+                           write_invoice_highlighted, write_mandatory)
 from .extract import (document_fields, extract, extract_document,
                       extract_with_highlights, verify_document)
 from .verify import report
@@ -28,6 +28,9 @@ def build_parser():
     parser.add_argument("--mandatory", metavar="FILE", type=Path,
                         help="write the highlighted fields as the columns of "
                              "the extract, one row per document and per item")
+    parser.add_argument("--per-invoice", action="store_true",
+                        help="with --highlights, write one workbook per "
+                             "invoice rather than one per document")
     parser.add_argument("--all-fields", action="store_true",
                         help="write every field each document carries, "
                              "whether highlighted or not")
@@ -81,6 +84,13 @@ def main(argv=None):
 
         if args.highlights:
             name = safe_name(boe.be_number or pdf_path.stem)
+            if args.per_invoice:
+                for invoice in boe.invoices:
+                    label = safe_name(invoice.number or name)
+                    out_path = args.output_dir / f"BOE__{name}__{label}__highlighted.xlsx"
+                    write_invoice_highlighted(boe, invoice, fields, highlights, out_path)
+                    print(f"  {out_path}  ({len(invoice.items)} line item(s))")
+                continue
             out_path = args.output_dir / f"BOE__{name}__highlighted.xlsx"
             write_highlighted(boe, fields, highlights, out_path)
             print(f"  {out_path}  ({len(highlights)} highlight(s), "
