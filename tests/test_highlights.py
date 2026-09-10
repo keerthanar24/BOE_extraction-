@@ -57,26 +57,26 @@ def test_courier_highlighted_fields(courier):
     assert values["Invoice Number"] == "FBA15M6L9KGF01"
     assert values["Invoice Value"] == "1080"
     assert values["Terms of Invoice"] == "CIF"
-    assert values["CTSH"] == "91021100"
-    assert values["Assessable Value"] == "19541.25"
-    assert values["Name of Manufacturer"] == "GATI HONG KONG LIMITED"
+    # Per-item fields live on the Line Items sheet, not among the document's.
+    assert "CTSH" not in values
+    assert "Assessable Value" not in values
 
 
-def test_multi_row_tables_are_kept_verbatim(courier):
-    """DUTY DETAILS has five rows, so it has no one value per column.
+def test_section_banners_are_not_reported_as_fields(courier):
+    """A highlight over a heading or a multi-row table names no field.
 
-    Its figures are already reported against each line item, so the highlight
-    is left as it was drawn.
+    Its figures are reported against each line item instead, so it is left out
+    of the document's fields and kept only in Highlights (raw).
     """
-    tables = [f.value for f in courier[1] if f.label == "(as highlighted)"]
-    duty = next(t for t in tables if t.startswith("Sr.No. Duty Head"))
-    assert "1 BCD 20 0 0 3908" in duty
-    assert "5 CMPNSTRY 0 0 0 0" in duty
+    assert not [f for f in courier[1] if f.label == "(as highlighted)"]
+    raw = " ".join(h.text for h in courier[2])
+    assert "1 BCD 20 0 0 3908" in raw
 
 
 def test_single_row_tables_become_fields(courier):
     """A bold heading row over one row of figures is a record, so read it."""
     values = _values(courier[1])
+    assert values["Current Status of the CBE"] == "OOC ISSUED on 29-08-2026 07:11"
     assert values["TR-6 Challan Number"] == "2908387251"
     assert values["Total Amount"] == "45833"
     assert values["Challan Date"] == "29/08/2026"
@@ -110,7 +110,11 @@ def test_standard_highlighted_header_fields(standard):
     assert values["Port Code"] == "INNSA1"
     assert values["BE No"] == "3141398"
     assert values["BE Date"] == "14/08/2026"
-    assert values["GSTIN/TYPE"] == "27AAFCV5265N1ZO/G"
+    assert values["G.WT (KGS)"] == "691"      # the barcode beside it is dropped
+    assert values["GSTIN"] == "27AAFCV5265N1ZO"
+    assert values["TYPE"] == "G"
+    assert values["IEC"] == "AAFCV5265N"
+    assert values["Br"] == "1"
     assert values["CB CODE"] == "AAHFS9149KCH001"
     assert values["AD CODE"] == "6480001"
     assert values["13.COUNTRY OF ORIGIN"] == "CHINA"
@@ -126,7 +130,7 @@ def test_standard_name_blocks_come_from_the_parser(standard):
     assert values["3.SUPPLIER NAME & ADDRESS"] == "GATI HONG KONG LIMITED"
 
 
-def test_item_fields_are_reported_for_every_item(tmp_path, courier):
+def test_every_item_is_reported_on_line_items(tmp_path, courier):
     """A field highlighted on item 1 is wanted for all of them."""
     from openpyxl import load_workbook
 
@@ -134,15 +138,16 @@ def test_item_fields_are_reported_for_every_item(tmp_path, courier):
 
     boe, fields, highlights = courier
     path = write_highlighted(boe, fields, highlights, tmp_path / "h.xlsx")
-    sheet = load_workbook(path)["Item Details"]
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Highlighted Fields", "Line Items",
+                                   "Highlights (raw)"]
+    sheet = workbook["Line Items"]
     header = [c.value for c in sheet[1]]
-    assert "Name of Manufacturer" in header
-    assert "Assessable Value" in header
     assert sheet.max_row == 5  # header plus four items
 
     column = header.index("Assessable Value") + 1
     assert [sheet.cell(row=r, column=column).value for r in range(2, 6)] == [
-        "19541.25", "26055", "6513.75", "52110"]
+        19541.25, 26055, 6513.75, 52110]
 
 
 def test_workbook_records_every_highlight_verbatim(tmp_path, standard):
@@ -166,15 +171,13 @@ def test_combined_workbook_holds_every_document(tmp_path):
     documents = [extract_document(COURIER), extract_document(STANDARD)]
     path = write_combined(documents, tmp_path / "combined.xlsx")
     workbook = load_workbook(path)
-    assert workbook.sheetnames == ["Documents", "Invoices", "Line Items",
-                                   "Highlighted Fields", "Item Details",
-                                   "Highlights (raw)"]
+    assert workbook.sheetnames == ["Invoices", "Line Items",
+                                   "Highlighted Fields", "Highlights (raw)"]
 
     # Every sheet names the document each row came from.
     for name in workbook.sheetnames:
         assert workbook[name]["A1"].value == "Document"
 
-    assert workbook["Documents"].max_row == 3          # header plus two documents
     assert workbook["Invoices"].max_row == 4           # one courier, two ICEGATE
     assert workbook["Line Items"].max_row == 14        # 4 + 9 items
     assert workbook["Highlights (raw)"].max_row == 55 + 84 + 1
@@ -188,16 +191,16 @@ def test_combined_totals_match_the_documents(tmp_path):
 
     documents = [extract_document(COURIER), extract_document(STANDARD)]
     path = write_combined(documents, tmp_path / "combined.xlsx")
-    sheet = load_workbook(path)["Documents"]
-    rows = {r[0]: r for r in sheet.iter_rows(min_row=2, values_only=True)}
+    sheet = load_workbook(path)["Invoices"]
+    rows = [r for r in sheet.iter_rows(min_row=2, values_only=True)]
 
-    courier = rows[COURIER.name]
-    assert courier[1] == "CBE-XIV"
-    assert (courier[11], courier[12], courier[13]) == (4, 104220, 45814)
+    courier = next(r for r in rows if r[0] == COURIER.name)
+    assert (courier[1], courier[7], courier[8], courier[9]) == (
+        "FBA15M6L9KGF01", 4, 104220, 45814)
 
-    standard = rows[STANDARD.name]
-    assert standard[1] == "ICEGATE BOE"
-    assert (standard[11], standard[12]) == (9, 560008)
+    standard = [r for r in rows if r[0] == STANDARD.name]
+    assert [r[1] for r in standard] == ["FBA15M13GSD3", "FBA15M16XHDH"]
+    assert sum(r[8] for r in standard) == 560008
 
 
 def test_mandatory_workbook_uses_the_fields_as_columns(tmp_path):
@@ -243,21 +246,28 @@ def test_item_rows_cover_every_item_of_every_document(tmp_path):
     assert sheet.max_row == 4 + 9 + 1
 
 
-def test_item_table_values_come_from_the_parsed_row(standard):
-    """"3.DESCRIPTION" begins under "2.CTH", so reading it by column clips it."""
+def test_the_item_table_is_reported_on_line_items(standard):
+    """Part II's item columns are per item, so they belong on Line Items."""
     values = _values(standard[1])
-    assert values["2.CTH"] == "39269099"
-    assert values["3.DESCRIPTION"] == "X002HTKLZJ MACBOOK PRO 16 INCH CASE - PC"
-    assert values["4.UNIT PRICE"] == "4.62"
-    assert values["5.QUANTITY"] == "40"
-    assert values["7.AMOUNT"] == "184.8"
+    for label in ("1.S NO.", "2.CTH", "3.DESCRIPTION", "4.UNIT PRICE",
+                  "5.QUANTITY", "6.UQC", "7.AMOUNT"):
+        assert label not in values
+    first = standard[0].all_items()[0]
+    assert first.hs_code == "39269099"
+    assert first.description == "X002HTKLZJ MACBOOK PRO 16 INCH CASE - PC"
+    assert (first.unit_price, first.quantity, first.unit_of_measure) == (4.62, 40, "NOS")
 
 
 def test_a_blank_field_does_not_borrow_an_item_value(courier):
-    """The courier form carries a Country of Origin at both levels."""
-    origins = {f.key: f.value for f in courier[1] if f.label == "Country of Origin"}
-    assert origins["SPECIAL REQUESTS · Country of Origin"] == ""
-    assert origins["DETAILED DESCRIPTION OF ITEM · Country of Origin"] == "CHINA"
+    """The courier form carries a Country of Origin at both levels.
+
+    Only the document's own is reported here -- the item's is on Line Items --
+    and a blank one must stay blank rather than take the item's value.
+    """
+    origins = [f for f in courier[1] if f.label == "Country of Origin"]
+    assert [f.value for f in origins] == [""]
+    assert origins[0].section == "SPECIAL REQUESTS"
+    assert courier[0].all_items()[0].details["Country of Origin"] == "CHINA"
 
 
 CBE_XIII_HIGHLIGHTED = SAMPLES / "FBA15M1ZPS2Y01_cbe_xiii_highlighted.pdf"
@@ -271,9 +281,9 @@ def test_highlights_resolve_on_a_cbe_xiii():
     values = _values(fields)
     assert values["Import Export Code"] == "AAFCV5265N"
     assert values["KYC ID"] == "29AAFCV5265N1ZK"
-    assert values["CTSH"] == "42023290"
-    assert values["Description of Goods"] == "X002447XTT Meta Ray-Ban Glasses Carrying Case"
-    assert values["Quantity"] == "7"
+    # Its per-item fields are reported on Line Items instead.
+    assert "CTSH" not in values
+    assert boe.all_items()[0].hs_code == "42023290"
 
 
 def test_a_document_total_is_not_replaced_by_an_items_share():
@@ -286,6 +296,8 @@ def test_a_document_total_is_not_replaced_by_an_items_share():
     values = _values(fields)
     assert values["Assessable Value"] == "82062.07"   # not item 1's 2844.07
     assert values["Duty(Rs.)"] == "29648"             # not item 1's 1066
+    boe, _, _ = extract_with_highlights(CBE_XIII_HIGHLIGHTED)
+    assert boe.be_number == "CBEXIII_DEL_2026-2027_2707_14754"
 
 
 def test_a_value_wrapped_onto_a_second_line_is_joined(standard):
@@ -301,12 +313,12 @@ def test_a_wrapped_heading_is_not_read_as_values(standard):
     """"7.ADV BE 11.FIRST 12. PROV/" wraps onto "(Y/N/P) CHECK FINAL".
 
     Both lines are heading; the values are further down. Reading the wrapped
-    line as values turned the flag "N" into "CHECKN".
+    line as values turned the flag "N" into "CHECKN". Those processing flags
+    are not reported, but the fields around them must survive intact.
     """
     values = _values(standard[1])
-    assert values["11.FIRST"] == "N"
-    assert values["12. PROV/"] == "F"
     assert values["1.BE STATUS"] == "FIRST COPY"
+    assert values["2.MODE"] == "Sea"
     # A heading whose value sits beside it still resolves.
     assert values["15.PORT OF LOADING"] == "Shekou"
     assert values["16.PORT OF SHIPMENT"] == "Shekou"

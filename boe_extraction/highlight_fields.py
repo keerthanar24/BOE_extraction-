@@ -19,6 +19,7 @@ from .icegate_tables import read_tables
 from .pdf_text import is_bold, upright_page, word_lines
 
 PART_HEADING = re.compile(r"^PART - [IVX]+ - .+")
+BANNER = re.compile(r"^(BILL OF ENTRY FOR [A-Z ]+?)(?: PKG| G\.WT|$)")
 # What opens an item on a courier form: CBE-XIV numbers them, CBE-XIII does not.
 ITEM_BLOCK = re.compile(r"^(?:Details\s+Of\s+Item\s*-\s*\d+|ITEM\s*:)$", re.IGNORECASE)
 # The narrowest gap between two columns of one of the forms' small tables.
@@ -28,6 +29,24 @@ TABLE_COLUMN_GAP = 20
 ROW_SLACK = 4
 # Stands in for a highlight over a heading or a table, which has no one label.
 AS_HIGHLIGHTED = "(as highlighted)"
+
+# A field the form prints as one cell but which holds two values.
+SPLIT_FIELDS = {
+    "IEC/Br": ("IEC", "Br"),
+    "GSTIN/TYPE": ("GSTIN", "TYPE"),
+}
+# Stamps and barcodes the form prints beside a value.
+STAMP = re.compile(r"\s*(FIRST COPY|SECOND COPY|BE\d{10,})\s*")
+# ICEGATE processing flags: not extracted data.
+DROP_LABELS = {
+    "1.S.NO", "2.INVOICE NO", "3.INV. AMT", "3.DEF BE", "4.KACHA", "5.SEC 48",
+    "6.REIMP", "8.ASSESS", "9.EXAM", "10.HSS", "3.AEO", "5.AEO", "10.SAED",
+    "11.GSIA", "12.TTA", "1.INVSNO", "23.PRODN24.CNTRL", "7.ADV BE",
+    "11.FIRST", "12. PROV/",
+    # The Part II item table is reported per item on the Line Items sheet.
+    "1.S NO.", "2.CTH", "3.DESCRIPTION", "4.UNIT PRICE", "5.QUANTITY",
+    "6.UQC", "7.AMOUNT",
+}
 
 # Blocks whose label is indented over a wider cell than the value beneath it,
 # so the column reader clips the value. The parser already has these.
@@ -50,7 +69,8 @@ class Field:
     the importer's name from the supplier's.
     """
 
-    __slots__ = ("page", "top", "label", "value", "highlighted", "section")
+    __slots__ = ("page", "top", "label", "value", "highlighted", "section",
+                 "qualified")
 
     def __init__(self, page, top, label, value, highlighted, section=""):
         self.page = page
@@ -59,11 +79,12 @@ class Field:
         self.value = value
         self.highlighted = highlighted
         self.section = section
+        self.qualified = False
 
     @property
     def key(self):
-        """The field's name, qualified by its section."""
-        return f"{self.section} · {self.label}" if self.section else self.label
+        """The field's name, qualified by its section where the name repeats."""
+        return f"{self.section} · {self.label}" if self.qualified else self.label
 
     def __repr__(self):
         return f"Field(p{self.page + 1} {self.label!r}={self.value!r})"
@@ -167,20 +188,27 @@ def _section_before(cells, sections, highlight):
 
 
 def _part_headings(pdf):
-    """Where each "PART - n" heading starts, per page."""
-    headings = {}
+    """Where each "PART - n" heading starts, per page, and the form's banner.
+
+    The header block above PART - I sits under no heading of its own, so the
+    banner the form prints across the top stands as its category.
+    """
+    headings, banner = {}, ""
     for page_index, page in enumerate(pdf.pages):
         for line in word_lines(upright_page(page)):
             text = " ".join(w["text"] for w in line)
             if PART_HEADING.match(text):
                 headings.setdefault(page_index, []).append((line[0]["top"], text))
+            elif not banner and BANNER.match(text):
+                banner = BANNER.match(text).group(1).strip()
+    headings["banner"] = banner
     return headings
 
 
 def _section_at(headings, page, top):
     above = [text for heading_top, text in headings.get(page, [])
              if heading_top <= top]
-    return above[-1] if above else ""
+    return above[-1] if above else headings.get("banner", "")
 
 
 def _standard_fields(pdf, highlights, boe):
@@ -209,18 +237,39 @@ def _standard_fields(pdf, highlights, boe):
 
 
 def _qualify_repeats(fields):
-    """Keep a field's section in its name only where the label repeats.
+    """Put a field's section into its name only where the label repeats.
 
-    "BOE Number" needs no qualifying; "Name" does, because the importer, the
-    supplier and the broker each have one.
+    Every field keeps its section in its own column -- that is the category it
+    belongs under -- but "BOE Number" needs no qualifying in the name itself,
+    while "Name" does, because the importer, the supplier and the broker each
+    have one.
     """
     counts = {}
     for field in fields:
         counts[field.label] = counts.get(field.label, 0) + 1
     for field in fields:
-        if counts[field.label] < 2:
-            field.section = ""
+        field.qualified = counts[field.label] > 1 and bool(field.section)
     return fields
+
+
+def _split_and_clean(fields):
+    """Separate a two-in-one field, and drop stamps printed beside a value."""
+    result = []
+    for field in fields:
+        # "FIRST COPY" is a stamp printed beside other values, but it is also
+        # the value of 1.BE STATUS, so never strip a field down to nothing.
+        stripped = STAMP.sub(" ", field.value or "").strip()
+        if stripped:
+            field.value = stripped
+        parts = SPLIT_FIELDS.get(field.label)
+        if parts and "/" in field.value:
+            head, _, tail = field.value.partition("/")
+            for name, value in zip(parts, (head.strip(), tail.strip())):
+                result.append(Field(field.page, field.top, name, value,
+                                    field.highlighted, field.section))
+            continue
+        result.append(field)
+    return result
 
 
 def _item_blocks(pdf, boe):
@@ -243,6 +292,28 @@ def _item_at(blocks, field):
         else:
             break
     return found
+
+
+def _shared_item_labels(blocks):
+    """Labels every item carries, which are therefore per-item fields.
+
+    Position alone is not enough: everything after the last item heading sits
+    "inside" it, including the payment block at the end of a courier form. A
+    genuine per-item field appears on more than one item; that block's fields
+    appear on only the last.
+    """
+    if len(blocks) < 2:
+        return {label for _, item in blocks for label in item.details}
+    counts = {}
+    for _, item in blocks:
+        for label in item.details:
+            counts[label] = counts.get(label, 0) + 1
+    return {label for label, seen in counts.items() if seen > 1}
+
+
+def _belongs_to_an_item(blocks, shared, field):
+    item = _item_at(blocks, field)
+    return item is not None and field.label in shared
 
 
 def _use_parsed_item_values(fields, boe, blocks):
@@ -299,6 +370,11 @@ def collect(pdf, form_type, boe=None):
             continue
         seen.add(key)
         kept.append(field)
+    kept = _split_and_clean(kept)
+    shared = _shared_item_labels(blocks)
+    kept = [f for f in kept
+            if f.label not in DROP_LABELS and f.label != AS_HIGHLIGHTED
+            and not _belongs_to_an_item(blocks, shared, f)]
     kept.sort(key=lambda f: (f.page, round(f.top), f.label))
     _qualify_repeats(kept)
     return kept

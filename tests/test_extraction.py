@@ -120,9 +120,12 @@ def test_workbook_matches_the_established_column_layout(tmp_path, courier):
     sheet = load_workbook(path)["Sheet1"]
     assert [c.value for c in sheet[1]] == [
         "TRUE", "Item Number", "HS Code", "Description", "Quantity",
-        "Unit of Measure", "Unit Price", "Assessable Value", "BCD Rate",
-        "BCD Amount", "SWS Rate", "SWS Amount", "IGST Rate", "IGST Amount",
-        "AIDC Rate", "AIDC Amount", "CMPNSTRY Rate", "CMPNSTRY Amount",
+        "Unit of Measure", "Unit Price", "Assessable Value",
+        "Notification number", "serial number of notification",
+        "BCD Rate", "BCD Specific rate", "BCD Amount", "SWS Rate", "SWS Amount",
+        "IGST Rate", "IGST Amount", "AIDC Rate", "AIDC Amount",
+        "ADD Rate", "ADD Amount", "CHCESS rate", "CHCESS Amount",
+        "CESS rate", "CESS Amount", "CMPNSTRY Rate", "CMPNSTRY Amount",
         "Duty Amount", "Exchange Rate"]
     assert sheet.max_row == 5
     assert sheet["A2"].value is True
@@ -214,3 +217,22 @@ def test_an_extraction_of_nothing_fails_verification():
     (check,) = verify(None, empty)
     assert check.name == "Line items found"
     assert check.ok is False
+
+
+def test_notifications_are_read_for_every_form(courier, standard, cbe_xiii):
+    """Each item names the notifications its duty was assessed under."""
+    assert courier.all_items()[0].notification_number == "001/2017\n009/2025\n011/2021"
+    assert courier.all_items()[0].notification_serial == "56\nII584\n19"
+    assert standard.all_items()[0].notification_number == "009/2025\n001/2017\n011/2021"
+    assert cbe_xiii.all_items()[0].notification_number.startswith("011/2021")
+
+
+def test_every_duty_head_lands_in_its_own_column(standard):
+    """The forms carry different heads; each must keep its own pair."""
+    item = standard.all_items()[0]
+    assert (item.bcd_rate, item.bcd_amount) == (15, 2662.5)
+    assert (item.sws_rate, item.sws_amount) == (10, 266.3)
+    assert (item.igst_rate, item.igst_amount) == (18, 3722.2)
+    assert item.cmpnstry_amount == 0        # ICEGATE "6.G. CESS"
+    assert item.add_amount == 0             # ICEGATE "7.ADD"
+    assert item.duty_amount == 6651

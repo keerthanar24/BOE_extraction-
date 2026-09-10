@@ -16,8 +16,16 @@ DUTY_HEADS = {
     "SWSRCHRG": "sws",
     "SWS": "sws",
     "IGST": "igst",
-    "CMPNSTRY": "cess",
+    "CMPNSTRY": "cmpnstry",
+    "ADD": "add",
 }
+
+# "Sr.No. Duty Head Ad Valorem Specific Rate Duty Forgone Duty Amount"
+DUTY_ROW_FULL = re.compile(
+    r"^\s*\d+\s+([A-Za-z ]+?)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*$")
+# "Sr.No. Notification Number Serial Number of Notification"
+NOTIFICATION_ROW = re.compile(
+    r"^\s*\d+\s+(\d{3}/\d{4})\s+(\S+)\s*$")
 
 DUTY_ROW = re.compile(
     r"^\s*\d+\s+([A-Za-z ]+?)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*$")
@@ -107,18 +115,36 @@ def _sections(entries, pattern):
 
 
 def _duties_in(lines, start, end):
-    """The DUTY DETAILS grid falling between two document positions."""
+    """The DUTY DETAILS grid falling between two document positions.
+
+    Each row is "Sr.No. Head AdValorem SpecificRate DutyForgone DutyAmount",
+    so the specific rate is read alongside the ad valorem one.
+    """
     duties = {}
     for page, top, text in lines:
         if (page, top) < start or (page, top) >= end:
             continue
-        match = DUTY_ROW.match(text)
+        match = DUTY_ROW_FULL.match(text)
         if not match:
             continue
         head = DUTY_HEADS.get(re.sub(r"\s", "", match.group(1)).upper())
         if head:
-            duties[head] = (_num(match.group(2)), _num(match.group(5)))
+            duties[head] = (_num(match.group(2)), _num(match.group(5)),
+                            _num(match.group(3)))
     return duties
+
+
+def _notifications_in(lines, start, end):
+    """The NOTIFICATION USED FOR THE ITEM table, as (numbers, serials)."""
+    numbers, serials = [], []
+    for page, top, text in lines:
+        if (page, top) < start or (page, top) >= end:
+            continue
+        match = NOTIFICATION_ROW.match(text)
+        if match:
+            numbers.append(match.group(1))
+            serials.append(match.group(2))
+    return "\n".join(numbers), "\n".join(serials)
 
 
 def _parse_item(section, number, lines, next_start):
@@ -132,9 +158,13 @@ def _parse_item(section, number, lines, next_start):
     item.assessable_value = section.number("Assessable Value")
 
     start, _ = section.span()
-    for head, (rate, amount) in _duties_in(lines, start, next_start).items():
+    for head, (rate, amount, specific) in _duties_in(lines, start, next_start).items():
         setattr(item, f"{head}_rate", rate)
         setattr(item, f"{head}_amount", amount)
+        if head == "bcd":
+            item.bcd_specific_rate = specific
+    item.notification_number, item.notification_serial = _notifications_in(
+        lines, start, next_start)
 
     item.details = {label: _clean(value) for label, value in section.by_label.items()}
     item.backfill_bcd()

@@ -22,7 +22,10 @@ DUTY_COLUMNS = {
     "1.BCD": "bcd",
     "3.SWS": "sws",
     "5.IGST": "igst",
-    "6.G.CESS": "cess",
+    "7.ADD": "add",
+    "6.G.CESS": "cmpnstry",   # compensation cess
+    "2.CHCESS": "chcess",
+    "4.CESS": "cess",
     "5.CAIDC": "aidc",
 }
 ASSESSABLE_VALUE = "29.ASSESS VALUE"
@@ -34,6 +37,7 @@ ITEM_ROW = re.compile(r"^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*?)((?:\s+[YN]){5})$"
 PART2_ITEM = re.compile(
     r"^(\d+)\s+(\d{4,8})\s+(.+?)\s+([\d.]+)\s+([\d.]+)\s+([A-Z]{2,4})\s+([\d.,]+)$")
 NUMBER = re.compile(r"^-?[\d.,]+$")
+NOTIFICATION = re.compile(r"^\d{3}/\d{4}$")
 # The form prints a one-letter status stamp after some names.
 TRAILING_STAMP = re.compile(r"\s+[A-Z]$")
 
@@ -90,6 +94,27 @@ def _headings(line, labels):
     return found, fields
 
 
+def _text_cells(line, fields):
+    """Words on a line grouped by column, keeping non-numeric text."""
+    grouped = {}
+    if not fields:
+        return grouped
+    for word in line:
+        if word["text"] in ("Notn", "No.", "SNo."):
+            continue
+        owner = None
+        for field in fields:
+            if word["x0"] >= field["x0"] - COLUMN_SLACK:
+                owner = field
+            else:
+                break
+        if owner is None:
+            continue
+        name = _field_name(owner["text"])
+        grouped[name] = (grouped.get(name, "") + " " + word["text"]).strip()
+    return grouped
+
+
 def _cells(line, fields):
     """Numeric words on a line, grouped under the heading they sit beneath."""
     grouped = {}
@@ -113,18 +138,26 @@ def _cells(line, fields):
 
 
 def _duty_block(lines, start):
-    """Read one "DUTY ... Rate ... Amount" grid starting at ``lines[start]``."""
+    """Read one "DUTY ... Rate ... Amount" grid starting at ``lines[start]``.
+
+    Also returns the notification number and serial printed above the rates,
+    which the form gives per duty head.
+    """
     fields = _headings(lines[start], set(DUTY_COLUMNS))[1]
-    rates, amounts = {}, {}
-    for line in lines[start + 1:start + 8]:
-        head = line[0]["text"]
-        if head == "Rate":
+    rates, amounts, notn_no, notn_sno = {}, {}, {}, {}
+    for index, line in enumerate(lines[start + 1:start + 8]):
+        head = " ".join(w["text"] for w in line[:2])
+        if line[0]["text"] == "Rate":
             rates = _cells(line, fields)
-        elif head == "Amount":
+        elif line[0]["text"] == "Amount":
             amounts = _cells(line, fields)
-        elif head == "DUTY":
+        elif head == "Notn No.":
+            notn_no = _text_cells(line, fields)
+        elif head == "Notn SNo.":
+            notn_sno = _text_cells(line, fields)
+        elif line[0]["text"] == "DUTY" and index:
             break
-    return rates, amounts
+    return rates, amounts, notn_no, notn_sno
 
 
 def _parse_part3(pdf):
@@ -152,7 +185,7 @@ def _parse_part3(pdf):
             for offset in range(index, end):
                 head = texts[offset].split(" ")[0]
                 if head == "DUTY":
-                    rates, amounts = _duty_block(lines, offset)
+                    rates, amounts, notn_no, notn_sno = _duty_block(lines, offset)
                     for label, key in DUTY_COLUMNS.items():
                         if label in rates or label in amounts:
                             record["duties"].setdefault(key, [None, None])
@@ -160,6 +193,11 @@ def _parse_part3(pdf):
                                 record["duties"][key][0] = _num(rates[label])
                             if label in amounts:
                                 record["duties"][key][1] = _num(amounts[label])
+                    for label in sorted(notn_no, key=lambda l: list(notn_no).index(l)):
+                        number = notn_no[label]
+                        if NOTIFICATION.match(number):
+                            record.setdefault("notifications", []).append(
+                                (number, notn_sno.get(label, "")))
                 elif "29." in texts[offset] and "ASSESS" in texts[offset]:
                     values = _cells(lines[offset + 1], _headings(
                         lines[offset], {ASSESSABLE_VALUE, TOTAL_DUTY})[1])
@@ -291,6 +329,9 @@ def parse(pdf, form_type, source_file=""):
                 "29.ASSESS VALUE": _text(duties.get("assessable_value")),
                 "30.TOTAL DUTY": _text(duties.get("duty_amount")),
             }
+            notifications = duties.get("notifications", [])
+            item.notification_number = "\n".join(n for n, _ in notifications)
+            item.notification_serial = "\n".join(s for _, s in notifications)
             item.duty_amount = duties.get("duty_amount")
             item.backfill_bcd()
             if item.duty_amount is None:

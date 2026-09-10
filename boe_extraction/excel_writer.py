@@ -150,9 +150,17 @@ def _highlighted_item_labels(boe, fields):
     them.
     """
     items = boe.all_items()
-    # Keep a label only where at least one item actually carries a value, so a
-    # document-level label that happens to share a name adds no empty column.
-    carried = {label for item in items for label, value in item.details.items() if value}
+    # Keep a label only where items actually carry a value under it. Where
+    # there are several items it must appear on more than one: a block that
+    # falls after the last item heading -- the payment details at the end of a
+    # courier form -- lands in that item alone and is not a per-item field.
+    counts = {}
+    for item in items:
+        for label, value in item.details.items():
+            if value:
+                counts[label] = counts.get(label, 0) + 1
+    threshold = 2 if len(items) > 1 else 1
+    carried = {label for label, seen in counts.items() if seen >= threshold}
     labels = []
     for field in fields:
         if field.label in carried and field.label not in labels:
@@ -186,10 +194,9 @@ def write_highlighted(boe, fields, highlights, path):
     resolved = workbook.active
     resolved.title = "Highlighted Fields"
     _write_highlighted(resolved, fields)
+    # Every per-item field is reported on Line Items, so a separate sheet of
+    # them only repeats it.
     _write_all_items(workbook.create_sheet("Line Items"), boe)
-    labels = _highlighted_item_labels(boe, fields)
-    if labels:
-        _write_item_details(workbook.create_sheet("Item Details"), boe, labels)
     _write_raw_highlights(workbook.create_sheet("Highlights (raw)"), highlights)
     workbook.save(path)
     return path
@@ -448,16 +455,12 @@ def write_combined(documents, path):
     several document types -- sit side by side in the same file.
     """
     workbook = Workbook()
-    summary = workbook.active
-    summary.title = "Documents"
-    _write_documents(summary, documents)
-    _write_invoices(workbook.create_sheet("Invoices"), documents)
+    invoices = workbook.active
+    invoices.title = "Invoices"
+    _write_invoices(invoices, documents)
     _write_combined_items(workbook.create_sheet("Line Items"), documents)
     if any(d.fields for d in documents):
         _write_combined_fields(workbook.create_sheet("Highlighted Fields"), documents)
-        details = workbook.create_sheet("Item Details")
-        if not _write_combined_details(details, documents):
-            workbook.remove(details)
         _write_combined_raw(workbook.create_sheet("Highlights (raw)"), documents)
     workbook.save(path)
     return path

@@ -15,7 +15,7 @@ is placed relative to them.
 import re
 from collections import Counter
 
-from .pdf_text import upright_page, word_lines
+from .pdf_text import is_bold, upright_page, word_lines
 
 # A right-aligned label ends within this band around its colon column.
 LABEL_END_BAND = (-6, 8)
@@ -23,6 +23,10 @@ LABEL_END_BAND = (-6, 8)
 VALUE_OFFSET = 5
 # The narrowest gap that can separate a left-hand value from a right-hand label.
 MIN_LABEL_GAP = 20
+# How clear of the right label column a full-width field's colon must sit.
+COLUMN_MARGIN = 30
+# The narrowest gap between two columns of one of the forms' small tables.
+TABLE_COLUMN_GAP = 12
 # A left-hand value starts within this distance of its own label column.
 VALUE_COLUMN_WIDTH = 60
 # How near the page centre a line must sit to read as a section heading.
@@ -104,13 +108,20 @@ def _colon_columns(pages):
 
 
 def _join(head, tail):
-    """Append a wrapped fragment to what came before it."""
+    """Append a wrapped fragment to what came before it.
+
+    A hyphen marks a word broken across lines. An identifier broken without one
+    -- "CBEXIV_DEL_2026-2027_2808_1" over "0570" -- joins closed too, which is
+    why a pair of space-free fragments is concatenated rather than spaced.
+    """
     if not head:
         return tail
     if not tail:
         return head
     if head.endswith("-"):
         return head[:-1] + tail
+    if " " not in head.strip() and " " not in tail.strip():
+        return head + tail
     return head + " " + tail
 
 
@@ -132,6 +143,12 @@ def _split_off_label(middle, left_column, right_column):
     # Nothing sitting in the left value column means the whole band is a label.
     if middle[0]["x0"] > left_column + VALUE_COLUMN_WIDTH:
         return [], middle
+    # The form sets labels in bold and values in regular, so a right-hand label
+    # starts at the first bold word after the left-hand value.
+    if not is_bold(middle[0]):
+        for index in range(1, len(middle)):
+            if is_bold(middle[index]):
+                return middle[:index], middle[index:]
     widest, split_at = 0, None
     for index in range(1, len(middle)):
         gap = middle[index]["x0"] - middle[index - 1]["x1"]
@@ -142,6 +159,55 @@ def _split_off_label(middle, left_column, right_column):
     if widest < MIN_LABEL_GAP:
         return middle, []
     return middle[:split_at], middle[split_at:]
+
+
+def _single_row_table(header, following):
+    """A bold heading row over one row of values, as (label, value) pairs."""
+    if not following or len(header) < 4:
+        return None
+    values = following[0]
+    if not all(is_bold(w) for w in header) or any(is_bold(w) for w in values):
+        return None
+
+    groups = [[header[0]]]
+    for previous, word in zip(header, header[1:]):
+        if word["x0"] - previous["x1"] >= TABLE_COLUMN_GAP:
+            groups.append([word])
+        else:
+            groups[-1].append(word)
+    if len(groups) < 3:
+        return None
+
+    pairs = []
+    for position, group in enumerate(groups):
+        start = group[0]["x0"] - TABLE_COLUMN_GAP
+        until = (groups[position + 1][0]["x0"] - TABLE_COLUMN_GAP
+                 if position + 1 < len(groups) else float("inf"))
+        held = [w["text"] for w in values
+                if start <= (w["x0"] + w["x1"]) / 2 < until]
+        pairs.append((_text(group), " ".join(held)))
+    return pairs
+
+
+def _full_width_field(line, label_edge, right_column):
+    """A "Label : value" line that runs across both columns, or None.
+
+    Its colon must fall between the two label columns; one sitting on either
+    column belongs to the ordinary grid.
+    """
+    colons = [i for i, w in enumerate(line) if w["text"] == ":"]
+    if len(colons) != 1:
+        return None
+    at = colons[0]
+    if at == 0 or at == len(line) - 1:
+        return None
+    if line[at]["x1"] <= label_edge or line[0]["x0"] > label_edge:
+        return None
+    if line[at]["x1"] >= right_column - COLUMN_MARGIN:
+        return None
+    label = " ".join(w["text"] for w in line[:at])
+    value = " ".join(w["text"] for w in line[at + 1:])
+    return (label + " :", value) if label and value else None
 
 
 def _is_heading(line, page_centre, columns):
@@ -220,14 +286,47 @@ def read_entries(pdf):
         # Cells wrap across lines but never across a page break.
         left = _Column("left", entries)
         right = _Column("right", entries)
-        for line in word_lines(upright_page(page)):
+        page_lines = word_lines(upright_page(page))
+        skip_next = False
+        for index, line in enumerate(page_lines):
+            if skip_next:
+                skip_next = False
+                continue
             top = line[0]["top"]
             if PAGE_FOOTER.match(_text(line)):
+                continue
+
+            # A bold heading row over one regular row is a small table -- the
+            # IGM flight details -- which the two-column grid cannot hold.
+            table = _single_row_table(line, page_lines[index + 1:index + 2])
+            if table:
+                left.close()
+                right.close()
+                for label, value in table:
+                    cell = Cell(page_index, top, "left")
+                    cell.add_label(label + ":")
+                    cell.add_value(value)
+                    entries.append(cell)
+                skip_next = True
                 continue
             if _is_heading(line, page_centre, columns):
                 left.close()
                 right.close()
                 entries.append(Marker(page_index, top, _text(line)))
+                continue
+
+            # A line that starts left of the label column and carries its own
+            # colon is a full-width field -- "Current Status of the CBE : OOC
+            # ISSUED on ..." -- not part of the two-column grid.
+            wide = _full_width_field(line, label_edge, right_column)
+            if wide:
+                label_text, value_text = wide
+                left.close()
+                right.close()
+                cell = Cell(page_index, top, "left")
+                cell.add_label(label_text)
+                cell.add_value(value_text)
+                entries.append(cell)
                 continue
 
             label_words = [w for w in line if w["x1"] <= label_edge]

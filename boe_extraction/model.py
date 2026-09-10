@@ -4,6 +4,19 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 # The 20 line-item columns, in the order they are written to Excel.
+# Every duty head the forms carry, in the order they are written to Excel.
+# A form that has no such head leaves the pair blank.
+DUTY_HEADS = [
+    ("bcd", "BCD"),
+    ("sws", "SWS"),
+    ("igst", "IGST"),
+    ("aidc", "AIDC"),
+    ("add", "ADD"),
+    ("chcess", "CHCESS"),
+    ("cess", "CESS"),
+    ("cmpnstry", "CMPNSTRY"),
+]
+
 ITEM_COLUMNS = [
     ("item_number", "Item Number"),
     ("hs_code", "HS Code"),
@@ -12,7 +25,10 @@ ITEM_COLUMNS = [
     ("unit_of_measure", "Unit of Measure"),
     ("unit_price", "Unit Price"),
     ("assessable_value", "Assessable Value"),
+    ("notification_number", "Notification number"),
+    ("notification_serial", "serial number of notification"),
     ("bcd_rate", "BCD Rate"),
+    ("bcd_specific_rate", "BCD Specific rate"),
     ("bcd_amount", "BCD Amount"),
     ("sws_rate", "SWS Rate"),
     ("sws_amount", "SWS Amount"),
@@ -20,8 +36,14 @@ ITEM_COLUMNS = [
     ("igst_amount", "IGST Amount"),
     ("aidc_rate", "AIDC Rate"),
     ("aidc_amount", "AIDC Amount"),
-    ("cess_rate", "CMPNSTRY Rate"),
-    ("cess_amount", "CMPNSTRY Amount"),
+    ("add_rate", "ADD Rate"),
+    ("add_amount", "ADD Amount"),
+    ("chcess_rate", "CHCESS rate"),
+    ("chcess_amount", "CHCESS Amount"),
+    ("cess_rate", "CESS rate"),
+    ("cess_amount", "CESS Amount"),
+    ("cmpnstry_rate", "CMPNSTRY Rate"),
+    ("cmpnstry_amount", "CMPNSTRY Amount"),
     ("duty_amount", "Duty Amount"),
     ("exchange_rate", "Exchange Rate"),
 ]
@@ -51,11 +73,23 @@ class LineItem:
     igst_amount: Optional[float] = None
     aidc_rate: Optional[float] = None
     aidc_amount: Optional[float] = None
+    add_rate: Optional[float] = None
+    add_amount: Optional[float] = None
+    chcess_rate: Optional[float] = None
+    chcess_amount: Optional[float] = None
     cess_rate: Optional[float] = None
     cess_amount: Optional[float] = None
+    cmpnstry_rate: Optional[float] = None
+    cmpnstry_amount: Optional[float] = None
+    bcd_specific_rate: Optional[float] = None
+    notification_number: str = ""
+    notification_serial: str = ""
     duty_amount: Optional[float] = None
     exchange_rate: Optional[float] = None
     details: dict = field(default_factory=dict)
+
+    def duty_amounts(self):
+        return [getattr(self, f"{head}_amount") for head, _ in DUTY_HEADS]
 
     def backfill_bcd(self):
         """Recover a BCD amount the table reader dropped.
@@ -65,15 +99,14 @@ class LineItem:
         """
         if self.bcd_amount is not None or self.duty_amount is None:
             return
-        others = [self.sws_amount, self.igst_amount, self.aidc_amount, self.cess_amount]
+        others = [getattr(self, f"{head}_amount") for head, _ in DUTY_HEADS
+                  if head != "bcd"]
         if any(o is None for o in others):
             return
         self.bcd_amount = round(self.duty_amount - sum(others), 2)
 
     def total_duty(self):
-        parts = [self.bcd_amount, self.sws_amount, self.igst_amount,
-                 self.aidc_amount, self.cess_amount]
-        return round(sum(p for p in parts if p is not None), 2)
+        return round(sum(a for a in self.duty_amounts() if a is not None), 2)
 
 
 @dataclass
