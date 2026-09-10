@@ -5,9 +5,10 @@ import sys
 from pathlib import Path
 
 from .excel_writer import (output_paths, safe_name, write_combined,
-                           write_highlighted, write_invoice, write_mandatory)
-from .extract import (extract, extract_document, extract_with_highlights,
-                      verify_document)
+                           write_all_fields, write_highlighted, write_invoice,
+                           write_mandatory)
+from .extract import (document_fields, extract, extract_document,
+                      extract_with_highlights, verify_document)
 from .verify import report
 
 
@@ -27,6 +28,9 @@ def build_parser():
     parser.add_argument("--mandatory", metavar="FILE", type=Path,
                         help="write the highlighted fields as the columns of "
                              "the extract, one row per document and per item")
+    parser.add_argument("--all-fields", action="store_true",
+                        help="write every field each document carries, "
+                             "whether highlighted or not")
     parser.add_argument("--verify", action="store_true",
                         help="check the extraction against the counts and "
                              "totals each document declares, and write nothing")
@@ -39,6 +43,18 @@ def main(argv=None):
 
     if args.verify:
         return _verify(args)
+
+    if args.all_fields:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        for pdf_path in args.pdfs:
+            boe, rows = document_fields(pdf_path)
+            name = safe_name(boe.be_number or pdf_path.stem)
+            out = args.output_dir / f"BOE__{name}__all_fields.xlsx"
+            write_all_fields(boe, rows, out)
+            print(f"{pdf_path.name}: {boe.form_type}, {len(rows)} document field(s), "
+                  f"{len(boe.all_items())} line item(s)")
+            print(f"  {out}")
+        return 0
 
     if args.combined or args.mandatory:
         return _combined(args)

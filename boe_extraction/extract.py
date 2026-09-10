@@ -54,6 +54,23 @@ def extract_document(path, with_highlights=True):
     return Document(Path(path).name, boe, fields, highlights)
 
 
+def document_fields(path):
+    """Every label/value the document carries above its item blocks."""
+    from .cbe_grid import Cell, Marker, read_entries
+
+    with pdfplumber.open(str(path)) as pdf:
+        _, boe = _parse(pdf, path)
+        rows, section = [], ""
+        for entry in read_entries(pdf):
+            if isinstance(entry, Marker):
+                if entry.text.upper().startswith("ITEM"):
+                    break
+                section = entry.text.rstrip(" :,")
+            elif isinstance(entry, Cell) and entry.label and entry.label_done:
+                rows.append((section, entry.label, entry.value))
+    return boe, rows
+
+
 def verify_document(path):
     """Parse a document and check it against the totals it declares."""
     from .verify import verify

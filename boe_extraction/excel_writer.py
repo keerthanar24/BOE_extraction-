@@ -448,6 +448,61 @@ def write_mandatory(documents, path):
     return path
 
 
+# A field's label starts with a capital. Table fragments start with a digit,
+# and the declaration paragraphs with "(i)" or a lower-case word.
+JUNK_LABEL = re.compile(r"^(?:[^A-Z]|Sr\.No|Note$|Port :)")
+
+
+def _real_labels(items):
+    """The per-item labels that name a field, in the order the form prints.
+
+    A label is kept even where every item leaves it blank: an empty column
+    still says the form asks for that field.
+    """
+    labels = []
+    for item in items:
+        for label in item.details:
+            if label not in labels and len(label) <= 40 and not JUNK_LABEL.match(label):
+                labels.append(label)
+    return labels
+
+
+def write_all_fields(boe, document_fields, path):
+    """Every field the document carries, whether highlighted or not."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Document Fields"
+    sheet.append(["Section", "Field", "Value"])
+    for section, label, value in document_fields:
+        sheet.append([section, label, value])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for column, width in zip("ABC", (34, 38, 70)):
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "A2"
+
+    items = boe.all_items()
+    extra = [l for l in _real_labels(items)
+             if l not in {t for _, t in ITEM_COLUMNS}]
+    detail = workbook.create_sheet("Item Fields")
+    detail.append(["Invoice"] + [t for _, t in ITEM_COLUMNS] + extra)
+    for invoice in boe.invoices:
+        for item in invoice.items:
+            detail.append([invoice.number]
+                          + [getattr(item, name) for name, _ in ITEM_COLUMNS]
+                          + [item.details.get(l, "") for l in extra])
+    for cell in detail[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+    detail.column_dimensions["A"].width = 18
+    for index in range(2, detail.max_column + 1):
+        detail.column_dimensions[get_column_letter(index)].width = 22
+    detail.freeze_panes = "B2"
+    workbook.save(path)
+    return path
+
+
 def write_combined(documents, path):
     """One workbook covering every document in a run.
 
