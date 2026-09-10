@@ -433,26 +433,39 @@ SHEET_NAME_LIMIT = 31
 SHEET_SUFFIXES = (" Fields", " Line Items", " Highlights")
 
 
+# What the reader calls each form: the ICEGATE form is the cargo bill of
+# entry, and the two ECCS forms are the courier ones.
+FORM_LABELS = {"ICEGATE BOE": "Cargo BOE", "CBE-XIV": "Courier CBE-XIV",
+               "CBE-XIII": "Courier CBE-XIII"}
+
+
+def _sheet_safe(text, fallback):
+    """A sheet name Excel accepts: no : \\ / ? * [ ] and no leading quote."""
+    cleaned = re.sub(r"[:\\/?*\[\]]+", " ", (text or "").strip())
+    return re.sub(r"\s{2,}", " ", cleaned).strip(" '") or fallback
+
+
 def _unit_label(document, invoice, taken):
     """A short name for the sheets of one document, or of one of its invoices.
 
-    The invoice number names the unit where it can -- it is short and it is
-    what the reader recognises -- and the BE number stands in when a document
-    carries several invoices that this workbook does not split.
+    A document's sheets are named for the form it is, not for anything inside
+    it: an invoice number on the tab reads as though the invoices had been
+    split apart. Only sheets that really do cover a single invoice take its
+    number, and a BE number tells two bills of the same form apart.
     """
     room = SHEET_NAME_LIMIT - max(len(s) for s in SHEET_SUFFIXES)
-    if invoice is not None:
-        base = invoice.number
-    elif len(document.boe.invoices) == 1:
-        base = document.boe.invoices[0].number
-    else:
-        base = document.boe.be_number
-    base = safe_name(base or document.name, document.name)[:room].strip()
-    label, index = base, 1
+    form = FORM_LABELS.get(document.boe.form_type, document.boe.form_type)
+    base = _sheet_safe(invoice.number if invoice is not None else form,
+                       document.name)[:room].strip()
+    for candidate in (base, f"{base} {document.boe.be_number}"):
+        label = _sheet_safe(candidate, base)[:room].strip()
+        if label not in taken:
+            break
+    index = 1
     while label in taken:
         index += 1
         suffix = f" {index}"
-        label = base[:room - len(suffix)].strip() + suffix
+        label = label[:room - len(suffix)].strip() + suffix
     taken.add(label)
     return label
 

@@ -341,17 +341,23 @@ def test_one_workbook_gives_each_document_its_own_sheets(tmp_path):
     path = write_workbook(documents, tmp_path / "by_document.xlsx")
     workbook = load_workbook(path)
     assert workbook.sheetnames == [
-        "FBA15M6L9KGF01 Fields", "FBA15M6L9KGF01 Line Items",
-        "FBA15M6L9KGF01 Highlights",
-        "3141398 Fields", "3141398 Line Items", "3141398 Highlights"]
+        "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
+        "Courier CBE-XIV Highlights",
+        "Cargo BOE Fields", "Cargo BOE Line Items", "Cargo BOE Highlights"]
 
     # No sheet names a document, because no sheet holds more than one.
     for name in workbook.sheetnames:
         assert workbook[name]["A1"].value != "Document"
-    assert workbook["FBA15M6L9KGF01 Line Items"].max_row == 5      # 4 items
-    assert workbook["3141398 Line Items"].max_row == 10            # 9 items
-    assert workbook["FBA15M6L9KGF01 Highlights"].max_row == 56
-    assert workbook["3141398 Highlights"].max_row == 85
+    assert workbook["Courier CBE-XIV Line Items"].max_row == 5      # 4 items
+    assert workbook["Cargo BOE Highlights"].max_row == 85
+    assert workbook["Courier CBE-XIV Highlights"].max_row == 56
+
+    # The cargo bill's two invoices stay on one sheet, named by a column.
+    items = workbook["Cargo BOE Line Items"]
+    assert items.max_row == 10                                      # 9 items
+    assert items["A1"].value == "Invoice"
+    assert {r[0] for r in items.iter_rows(min_row=2, values_only=True)} == {
+        "FBA15M13GSD3", "FBA15M16XHDH"}
 
 
 def test_per_invoice_sheets_split_a_multi_invoice_document(tmp_path):
@@ -363,6 +369,7 @@ def test_per_invoice_sheets_split_a_multi_invoice_document(tmp_path):
     path = write_workbook([extract_document(STANDARD)],
                           tmp_path / "by_invoice.xlsx", per_invoice=True)
     workbook = load_workbook(path)
+    # Only sheets that really do cover one invoice are named for it.
     assert workbook.sheetnames == [
         "FBA15M13GSD3 Fields", "FBA15M13GSD3 Line Items",
         "FBA15M13GSD3 Highlights",
