@@ -123,11 +123,21 @@ def test_standard_highlighted_header_fields(standard):
     assert values["14.ASS. VALUE"] == "292981.32"
 
 
-def test_standard_name_blocks_come_from_the_parser(standard):
-    """These labels are indented over their value, so the column clips it."""
+def test_a_name_and_address_is_read_in_full(standard):
+    """The heading sits indented over a block that starts further left.
+
+    Reading only the line beneath it returned the name without the address.
+    """
     values = _values(standard[1])
-    assert values["1.IMPORTER NAME & ADDRESS"] == "VALUECART PRIVATE LIMITED"
-    assert values["3.SUPPLIER NAME & ADDRESS"] == "GATI HONG KONG LIMITED"
+    assert values["1.IMPORTER NAME & ADDRESS"] == (
+        "VALUECART PRIVATE LIMITED, FLAT No-4, G. S. TOWERS, OPPOSITE, "
+        "BIBWEWADI, PUNE, PUNE, 411037")
+    assert values["1.BUYER'S NAME & ADDRESS"].endswith("411037")
+    assert values["3.SUPPLIER NAME & ADDRESS"].startswith(
+        "GATI HONG KONG LIMITED, FLAT/RM C1303")
+    # This document names no third party; the block under that heading is
+    # empty, and must not borrow the supplier's.
+    assert values["4.THIRD PARTY NAME & ADDRESS"] == ""
 
 
 def test_every_item_is_reported_on_line_items(tmp_path, courier):

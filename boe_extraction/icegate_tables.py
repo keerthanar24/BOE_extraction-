@@ -20,6 +20,10 @@ from .pdf_text import is_bold, upright_page, word_lines
 NUMBERED = re.compile(r"^\d{1,2}\.(?!\d)")
 # The value line sits within this many points below its heading line.
 VALUE_LINE_GAP = 14
+# A heading whose value is a name and address printed over several lines.
+ADDRESS_BLOCK = re.compile(r"NAME & ADDRESS$")
+# The form prints a one-letter status stamp at the end of some address lines.
+TRAILING_STAMP = re.compile(r"\s+[A-Z]$")
 # A wrapped continuation follows within this many points of the line above it.
 CONTINUATION_GAP = 4
 # The narrowest gap that separates a heading from a value beside it. The form
@@ -234,6 +238,33 @@ def read_tables(pdf):
             bottom = max([w["bottom"] for w in below] or
                          [w["bottom"] for w in line])
 
+            def block(column, start):
+                """A name and address printed as a block under its heading.
+
+                The heading sits indented over a block that starts further
+                left, so the block runs from where the previous column ended.
+                Each line is cut short at the next label on it, since a
+                neighbouring column's value can share the line.
+                """
+                collected = []
+                for below in lines[index + 1:]:
+                    # A wholly bold line is the next heading row. A line that
+                    # merely carries a label alongside the address is cut, not
+                    # stopped at.
+                    if all(is_bold(w) for w in below):
+                        break
+                    labels = [w["x0"] for w in below
+                              if is_bold(w) and w["x0"] > start]
+                    limit = min([column.until] + labels)
+                    held = [w["text"] for w in below if not is_bold(w)
+                            and start <= (w["x0"] + w["x1"]) / 2 < limit]
+                    if not held:
+                        if collected:
+                            break
+                        continue
+                    collected.append(TRAILING_STAMP.sub("", " ".join(held)))
+                return ", ".join(c for c in collected if c)
+
             def under(column):
                 """The column's value, with any wrapped line joined back on."""
                 return _join_rows([_text([w for w in row if column.holds(w)])
@@ -244,7 +275,12 @@ def read_tables(pdf):
                 # value line under it; otherwise the heading's own trailing
                 # words would be mistaken for the value.
                 label, inline = (_text(column.words), "") if below else column.split()
-                pairs.append(Pair(page_index, label, inline or under(column),
+                value = inline or under(column)
+                if ADDRESS_BLOCK.search(label):
+                    position = columns.index(column)
+                    start = columns[position - 1].until if position else 0
+                    value = block(column, start) or value
+                pairs.append(Pair(page_index, label, value,
                                   top, bottom, column.x0, column.until))
 
             for column in bare:

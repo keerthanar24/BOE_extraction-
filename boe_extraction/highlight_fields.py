@@ -50,11 +50,9 @@ DROP_LABELS = {
 
 # Blocks whose label is indented over a wider cell than the value beneath it,
 # so the column reader clips the value. The parser already has these.
+# The name-and-address blocks are read in full from the page itself, so they
+# are no longer taken from the parser, which held only the name.
 FROM_PARSER = {
-    "1.IMPORTER NAME & ADDRESS": lambda boe, _: boe.importer_name,
-    "1.BUYER'S NAME & ADDRESS": lambda boe, _: boe.importer_name,
-    "3.SUPPLIER NAME & ADDRESS": lambda boe, invoice: invoice and invoice.supplier,
-    "4.THIRD PARTY NAME & ADDRESS": lambda boe, invoice: invoice and invoice.supplier,
     # The rate sits in a two-row table; the parser reads it off page 1.
     "EXCHANGE RATE": lambda boe, _: (f"1 {boe.currency}={boe.exchange_rate}INR"
                                      if boe.exchange_rate else ""),
