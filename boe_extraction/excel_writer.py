@@ -206,6 +206,32 @@ def _totals(items, field):
     return round(sum(getattr(i, field) or 0 for i in items), 2)
 
 
+def _write_document_invoices(sheet, document, invoice=None):
+    """The invoices of one document, with what each one totals.
+
+    Part II's per-invoice figures are reported here rather than among the
+    document's fields, where only the first invoice's could ever show.
+    """
+    sheet.append(["Invoice Number", "Invoice Date", "Supplier", "Invoice Value",
+                  "Currency", "Exchange Rate", "Line Items",
+                  "Assessable Value", "Total Duty"])
+    for one in ([invoice] if invoice is not None else document.boe.invoices):
+        sheet.append([one.number, one.date, one.supplier, one.invoice_value,
+                      one.currency, one.exchange_rate, len(one.items),
+                      _totals(one.items, "assessable_value"),
+                      _totals(one.items, "duty_amount")])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index in range(1, 10):
+        sheet.column_dimensions[get_column_letter(index)].width = 18
+    sheet.column_dimensions["C"].width = 30
+    for row in range(2, sheet.max_row + 1):
+        for index in (4, 8, 9):
+            sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "B2"
+
+
 def _write_document_items(sheet, document, invoice=None):
     """The line items of one document, or of one invoice of it."""
     invoices = [invoice] if invoice is not None else document.boe.invoices
@@ -430,7 +456,7 @@ def write_all_fields(boe, document_fields, path):
 # Excel caps a sheet name at 31 characters, and " Highlights" is the longest
 # suffix a group uses.
 SHEET_NAME_LIMIT = 31
-SHEET_SUFFIXES = (" Fields", " Line Items", " Highlights")
+SHEET_SUFFIXES = (" Invoices", " Fields", " Line Items", " Highlights")
 
 
 # What the reader calls each form: the ICEGATE form is the cargo bill of
@@ -489,6 +515,8 @@ def write_workbook(documents, path, per_invoice=False):
     workbook = Workbook()
     workbook.remove(workbook.active)
     for document, invoice, label in _units(documents, per_invoice):
+        _write_document_invoices(workbook.create_sheet(f"{label} Invoices"),
+                                 document, invoice)
         _write_highlighted(workbook.create_sheet(f"{label} Fields"),
                            document.fields)
         items = workbook.create_sheet(f"{label} Line Items")

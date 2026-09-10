@@ -22,8 +22,6 @@ NUMBERED = re.compile(r"^\d{1,2}\.(?!\d)")
 VALUE_LINE_GAP = 14
 # A heading whose value is a name and address printed over several lines.
 ADDRESS_BLOCK = re.compile(r"NAME & ADDRESS$")
-# The form prints a one-letter status stamp at the end of some address lines.
-TRAILING_STAMP = re.compile(r"\s+[A-Z]$")
 # A wrapped continuation follows within this many points of the line above it.
 CONTINUATION_GAP = 4
 # The narrowest gap that separates a heading from a value beside it. The form
@@ -262,7 +260,7 @@ def read_tables(pdf):
                         if collected:
                             break
                         continue
-                    collected.append(TRAILING_STAMP.sub("", " ".join(held)))
+                    collected.append(" ".join(held))
                 return ", ".join(c for c in collected if c)
 
             def under(column):

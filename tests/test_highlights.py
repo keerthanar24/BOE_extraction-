@@ -121,7 +121,17 @@ def test_standard_highlighted_header_fields(standard):
     assert values["13.COUNTRY OF ORIGIN"] == "CHINA"
     assert values["15.PORT OF LOADING"] == "Shekou"
     assert values["2.CB NAME"] == "INTERLINK SHIPPING & CLEARING"
-    assert values["14.ASS. VALUE"] == "292981.32"
+
+    # Part II repeats per invoice, so its figures are reported per invoice on
+    # the Invoices and Line Items sheets, not once at document level.
+    for label in ("2.INVOICE NO. & DT.", "3.PURCHASE ORDER NO & DT",
+                  "1.INV VALUE", "2.FREIGHT", "14.Cur", "15.Term",
+                  "14.ASS. VALUE"):
+        assert label not in values
+    invoice = standard[0].invoices[0]
+    assert (invoice.number, invoice.invoice_value, invoice.currency) == (
+        "FBA15M13GSD3", 3050.3, "USD")
+    assert round(sum(i.assessable_value for i in invoice.items), 2) == 292981.32
 
 
 def test_a_name_and_address_is_read_in_full(standard):
@@ -131,7 +141,7 @@ def test_a_name_and_address_is_read_in_full(standard):
     """
     values = _values(standard[1])
     assert values["1.IMPORTER NAME & ADDRESS"] == (
-        "VALUECART PRIVATE LIMITED, FLAT No-4, G. S. TOWERS, OPPOSITE, "
+        "VALUECART PRIVATE LIMITED, FLAT No-4, G. S. TOWERS, OPPOSITE H, "
         "BIBWEWADI, PUNE, PUNE, 411037")
     assert values["1.BUYER'S NAME & ADDRESS"].endswith("411037")
     assert values["3.SUPPLIER NAME & ADDRESS"].startswith(
@@ -341,9 +351,10 @@ def test_one_workbook_gives_each_document_its_own_sheets(tmp_path):
     path = write_workbook(documents, tmp_path / "by_document.xlsx")
     workbook = load_workbook(path)
     assert workbook.sheetnames == [
-        "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
-        "Courier CBE-XIV Highlights",
-        "Cargo BOE Fields", "Cargo BOE Line Items", "Cargo BOE Highlights"]
+        "Courier CBE-XIV Invoices", "Courier CBE-XIV Fields",
+        "Courier CBE-XIV Line Items", "Courier CBE-XIV Highlights",
+        "Cargo BOE Invoices", "Cargo BOE Fields", "Cargo BOE Line Items",
+        "Cargo BOE Highlights"]
 
     # No sheet names a document, because no sheet holds more than one.
     for name in workbook.sheetnames:
@@ -371,10 +382,15 @@ def test_per_invoice_sheets_split_a_multi_invoice_document(tmp_path):
     workbook = load_workbook(path)
     # Only sheets that really do cover one invoice are named for it.
     assert workbook.sheetnames == [
-        "FBA15M13GSD3 Fields", "FBA15M13GSD3 Line Items",
-        "FBA15M13GSD3 Highlights",
-        "FBA15M16XHDH Fields", "FBA15M16XHDH Line Items",
-        "FBA15M16XHDH Highlights"]
+        "FBA15M13GSD3 Invoices", "FBA15M13GSD3 Fields",
+        "FBA15M13GSD3 Line Items", "FBA15M13GSD3 Highlights",
+        "FBA15M16XHDH Invoices", "FBA15M16XHDH Fields",
+        "FBA15M16XHDH Line Items", "FBA15M16XHDH Highlights"]
+    for name, number in (("FBA15M13GSD3", "FBA15M13GSD3"),
+                         ("FBA15M16XHDH", "FBA15M16XHDH")):
+        sheet = workbook[f"{name} Invoices"]
+        assert sheet.max_row == 2                       # header plus its own
+        assert sheet["A2"].value == number
     assert workbook["FBA15M13GSD3 Line Items"].max_row == 6        # 5 items
     assert workbook["FBA15M16XHDH Line Items"].max_row == 5        # 4 items
     # Each invoice's sheet stands alone, so it need not name the invoice.

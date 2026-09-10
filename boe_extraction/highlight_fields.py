@@ -46,6 +46,11 @@ DROP_LABELS = {
     # The Part II item table is reported per item on the Line Items sheet.
     "1.S NO.", "2.CTH", "3.DESCRIPTION", "4.UNIT PRICE", "5.QUANTITY",
     "6.UQC", "7.AMOUNT",
+    # Part II repeats per invoice, so a document-level sheet could only ever
+    # show the first invoice's figures. The Invoices and Line Items sheets
+    # carry them per invoice, which is where they belong.
+    "2.INVOICE NO. & DT.", "3.PURCHASE ORDER NO & DT", "1.INV VALUE",
+    "2.FREIGHT", "14.Cur", "15.Term", "14.ASS. VALUE",
 }
 
 # Blocks whose label is indented over a wider cell than the value beneath it,
