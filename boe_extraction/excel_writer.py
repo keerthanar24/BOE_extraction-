@@ -206,127 +206,40 @@ def _totals(items, field):
     return round(sum(getattr(i, field) or 0 for i in items), 2)
 
 
-def _write_documents(sheet, documents):
-    sheet.append(["Document", "Form Type", "BE Number", "BE Date", "Port Code",
-                  "Importer", "IEC", "GSTIN", "Currency", "Exchange Rate",
-                  "Invoices", "Line Items", "Assessable Value", "Total Duty",
-                  "Highlights"])
-    for document in documents:
-        boe, items = document.boe, document.boe.all_items()
-        sheet.append([document.name, boe.form_type, boe.be_number, boe.be_date,
-                      boe.port_code, boe.importer_name, boe.iec, boe.gstin,
-                      boe.currency, boe.exchange_rate, len(boe.invoices),
-                      len(items), _totals(items, "assessable_value"),
-                      _totals(items, "duty_amount"), len(document.highlights)])
+def _write_document_items(sheet, document, invoice=None):
+    """The line items of one document, or of one invoice of it."""
+    invoices = [invoice] if invoice is not None else document.boe.invoices
+    named = invoice is None and len(document.boe.invoices) > 1
+    lead = ["Invoice"] if named else []
+    sheet.append(lead + [title for _, title in ITEM_COLUMNS])
+    for one in invoices:
+        for item in one.items:
+            sheet.append(([one.number] if named else [])
+                         + [getattr(item, field) for field, _ in ITEM_COLUMNS])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for index in range(1, 16):
-        sheet.column_dimensions[get_column_letter(index)].width = 20
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["F"].width = 28
-    for row in range(2, sheet.max_row + 1):
-        for index in (13, 14):
-            sheet.cell(row=row, column=index).number_format = MONEY
-    sheet.freeze_panes = "B2"
-
-
-def _write_invoices(sheet, documents):
-    sheet.append(["Document", "Invoice Number", "Invoice Date", "Supplier",
-                  "Invoice Value", "Currency", "Exchange Rate", "Line Items",
-                  "Assessable Value", "Total Duty"])
-    for document in documents:
-        for invoice in document.boe.invoices:
-            sheet.append([document.name, invoice.number, invoice.date,
-                          invoice.supplier, invoice.invoice_value,
-                          invoice.currency, invoice.exchange_rate,
-                          len(invoice.items),
-                          _totals(invoice.items, "assessable_value"),
-                          _totals(invoice.items, "duty_amount")])
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for index in range(1, 11):
-        sheet.column_dimensions[get_column_letter(index)].width = 18
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["D"].width = 30
-    for row in range(2, sheet.max_row + 1):
-        for index in (5, 9, 10):
-            sheet.cell(row=row, column=index).number_format = MONEY
-    sheet.freeze_panes = "B2"
-
-
-def _write_combined_fields(sheet, documents):
-    sheet.append(["Document", "Page", "Section", "Field", "Value"])
-    for document in documents:
-        for field in document.fields:
-            sheet.append([document.name, field.page + 1, field.section,
-                          field.label, field.value])
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-    for column, width in zip("ABCDE", (34, 7, 46, 38, 66)):
-        sheet.column_dimensions[column].width = width
-    sheet.freeze_panes = "D2"
-
-
-def _write_combined_items(sheet, documents):
-    sheet.append(["Document", "Invoice"] + [title for _, title in ITEM_COLUMNS])
-    for document in documents:
-        for invoice in document.boe.invoices:
-            for item in invoice.items:
-                sheet.append([document.name, invoice.number]
-                             + [getattr(item, field) for field, _ in ITEM_COLUMNS])
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["B"].width = 18
-    for index, (_, title) in enumerate(ITEM_COLUMNS, start=3):
+    first = 2 if named else 1
+    if named:
+        sheet.column_dimensions["A"].width = 18
+    for index, (_, title) in enumerate(ITEM_COLUMNS, start=first):
         letter = get_column_letter(index)
         sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
         if title in MONEY_COLUMNS:
             for row in range(2, sheet.max_row + 1):
                 sheet.cell(row=row, column=index).number_format = MONEY
-    sheet.freeze_panes = "C2"
+    sheet.freeze_panes = f"{get_column_letter(first + 1)}2"
 
 
-def _write_combined_details(sheet, documents):
-    columns = []
-    for document in documents:
-        for label in _highlighted_item_labels(document.boe, document.fields):
-            if label not in columns:
-                columns.append(label)
-    if not columns:
-        return False
-    sheet.append(["Document", "Invoice", "Item Number"] + columns)
-    for document in documents:
-        for invoice in document.boe.invoices:
-            for item in invoice.items:
-                sheet.append([document.name, invoice.number, item.item_number]
-                             + [item.details.get(label, "") for label in columns])
+def _write_document_raw(sheet, document):
+    sheet.append(["Page", "Highlighted text"])
+    for highlight in document.highlights:
+        sheet.append([highlight.page + 1, highlight.text])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["B"].width = 18
-    sheet.column_dimensions["C"].width = 12
-    for index in range(4, len(columns) + 4):
-        sheet.column_dimensions[get_column_letter(index)].width = 28
-    sheet.freeze_panes = "D2"
-    return True
-
-
-def _write_combined_raw(sheet, documents):
-    sheet.append(["Document", "Page", "Highlighted text"])
-    for document in documents:
-        for highlight in document.highlights:
-            sheet.append([document.name, highlight.page + 1, highlight.text])
-    for cell in sheet[1]:
-        cell.font = Font(bold=True)
-    sheet.column_dimensions["A"].width = 34
-    sheet.column_dimensions["B"].width = 7
-    sheet.column_dimensions["C"].width = 110
-    sheet.freeze_panes = "C2"
+    sheet.column_dimensions["A"].width = 7
+    sheet.column_dimensions["B"].width = 110
+    sheet.freeze_panes = "B2"
 
 
 def _split_levels(document):
@@ -338,13 +251,12 @@ def _split_levels(document):
     return document_fields, item_fields
 
 
-def _column_order(per_document):
-    """Every field name across the documents, in the order they were read."""
+def _column_order(fields):
+    """Every field name the document carries, in the order they were read."""
     order = []
-    for fields in per_document:
-        for field in fields:
-            if field.key not in order:
-                order.append(field.key)
+    for field in fields:
+        if field.key not in order:
+            order.append(field.key)
     return order
 
 
@@ -360,90 +272,70 @@ def _style_wide(sheet, fixed_widths, first_data_column):
     sheet.row_dimensions[1].height = 46
 
 
-def _write_mandatory_document(sheet, documents, columns):
-    sheet.append(["Document", "Form Type", "BE Number"] + columns)
-    for document, fields in documents:
-        values = {field.key: field.value for field in fields}
-        sheet.append([document.name, document.boe.form_type, document.boe.be_number]
-                     + [values.get(column, "") for column in columns])
-    _style_wide(sheet, [34, 14, 30], 4)
+def _write_mandatory_document(sheet, document, fields, columns):
+    sheet.append(["Form Type", "BE Number"] + columns)
+    values = {field.key: field.value for field in fields}
+    sheet.append([document.boe.form_type, document.boe.be_number]
+                 + [values.get(column, "") for column in columns])
+    _style_wide(sheet, [14, 30], 3)
 
 
-def _write_mandatory_items(sheet, documents, columns, labels_by_key):
-    sheet.append(["Document", "Invoice", "Item Number"] + columns)
-    for document, _ in documents:
-        for invoice in document.boe.invoices:
-            for item in invoice.items:
-                sheet.append([document.name, invoice.number, item.item_number]
-                             + [item.details.get(labels_by_key[c], "")
-                                for c in columns])
-    _style_wide(sheet, [34, 18, 12], 4)
+def _write_mandatory_items(sheet, invoices, columns, labels_by_key, named):
+    lead = (["Invoice"] if named else []) + ["Item Number"]
+    sheet.append(lead + columns)
+    for invoice in invoices:
+        for item in invoice.items:
+            sheet.append(([invoice.number] if named else []) + [item.item_number]
+                         + [item.details.get(labels_by_key[c], "")
+                            for c in columns])
+    _style_wide(sheet, [18, 12] if named else [12], len(lead) + 1)
 
 
-def _write_checklist(sheet, documents, document_columns, item_columns,
-                     labels_by_key, item_documents):
-    """Which mandatory fields came out filled, and which did not.
-
-    A field is only counted against the documents whose form carries it: the
-    two forms name their columns differently, so most are asked of one form.
-    """
-    sheet.append(["Field", "Level", "Records", "Filled", "Empty in"])
+def _write_checklist(sheet, fields, document_columns, item_columns,
+                     labels_by_key, items):
+    """Which mandatory fields came out filled, and which did not."""
+    sheet.append(["Field", "Level", "Records", "Filled"])
+    values = {field.key: field.value for field in fields}
     for column in document_columns:
-        filled, empty = 0, []
-        for document, fields in documents:
-            values = {field.key: field.value for field in fields}
-            if column not in values:
-                continue
-            if values[column]:
-                filled += 1
-            else:
-                empty.append(document.name)
-        present = sum(1 for _, fields in documents
-                      if any(f.key == column for f in fields))
-        sheet.append([column, "Document", present, filled, ", ".join(empty)])
-
+        sheet.append([column, "Document", 1, 1 if values.get(column) else 0])
     for column in item_columns:
         label = labels_by_key[column]
-        rows = [item for document, fields in item_documents
-                if any(f.key == column for f in fields)
-                for item in document.boe.all_items()]
-        sheet.append([column, "Line item", len(rows),
-                      sum(1 for i in rows if i.details.get(label)), ""])
-
+        sheet.append([column, "Line item", len(items),
+                      sum(1 for i in items if i.details.get(label))])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-    for index, width in enumerate([56, 12, 12, 10, 40], start=1):
+    for index, width in enumerate([56, 12, 12, 10], start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     sheet.freeze_panes = "A2"
 
 
-def write_mandatory(documents, path):
-    """The highlighted fields as a schema: one column each, one row per record.
+def write_mandatory(document, path, invoice=None):
+    """The highlighted fields of ONE document as a schema: one column each.
 
     The highlights are the required-field list, so they become the columns of
-    the extract rather than a name/value listing.
+    the extract rather than a name/value listing. Where a bill of entry
+    carries several invoices, pass the one this workbook covers.
     """
-    split = [(document, _split_levels(document)) for document in documents]
-    document_level = [(d, fields[0]) for d, fields in split]
-    item_level = [(d, fields[1]) for d, fields in split]
+    document_fields, item_fields = _split_levels(document)
+    document_columns = _column_order(document_fields)
+    item_columns = _column_order(item_fields)
+    labels_by_key = {field.key: field.label for field in item_fields}
 
-    document_columns = _column_order([fields for _, fields in document_level])
-    item_columns = _column_order([fields for _, fields in item_level])
-    labels_by_key = {field.key: field.label
-                     for _, fields in item_level for field in fields}
+    invoices = [invoice] if invoice is not None else document.boe.invoices
+    named = invoice is None and len(document.boe.invoices) > 1
+    items = [item for one in invoices for item in one.items]
 
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Mandatory Fields"
-    _write_mandatory_document(sheet, document_level, document_columns)
+    _write_mandatory_document(sheet, document, document_fields, document_columns)
     if item_columns:
         _write_mandatory_items(workbook.create_sheet("Mandatory Item Fields"),
-                               item_level, item_columns, labels_by_key)
-    _write_combined_items(workbook.create_sheet("Line Items"), documents)
-    _write_checklist(workbook.create_sheet("Field Checklist"),
-                     document_level, document_columns, item_columns,
-                     labels_by_key, item_level)
-    _write_combined_raw(workbook.create_sheet("Highlights (raw)"), documents)
+                               invoices, item_columns, labels_by_key, named)
+    _write_document_items(workbook.create_sheet("Line Items"), document, invoice)
+    _write_checklist(workbook.create_sheet("Field Checklist"), document_fields,
+                     document_columns, item_columns, labels_by_key, items)
+    _write_document_raw(workbook.create_sheet("Highlights (raw)"), document)
     workbook.save(path)
     return path
 
@@ -531,24 +423,6 @@ def write_all_fields(boe, document_fields, path):
     for index in range(2, detail.max_column + 1):
         detail.column_dimensions[get_column_letter(index)].width = 22
     detail.freeze_panes = "B2"
-    workbook.save(path)
-    return path
-
-
-def write_combined(documents, path):
-    """One workbook covering every document in a run.
-
-    Each sheet carries a Document column, so several bills of entry -- and
-    several document types -- sit side by side in the same file.
-    """
-    workbook = Workbook()
-    invoices = workbook.active
-    invoices.title = "Invoices"
-    _write_invoices(invoices, documents)
-    _write_combined_items(workbook.create_sheet("Line Items"), documents)
-    if any(d.fields for d in documents):
-        _write_combined_fields(workbook.create_sheet("Highlighted Fields"), documents)
-        _write_combined_raw(workbook.create_sheet("Highlights (raw)"), documents)
     workbook.save(path)
     return path
 

@@ -4,8 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .excel_writer import (output_paths, safe_name, write_combined,
-                           write_all_fields, write_highlighted, write_invoice,
+from .excel_writer import (output_paths, safe_name, write_all_fields,
+                           write_highlighted, write_invoice,
                            write_invoice_highlighted, write_mandatory)
 from .extract import (document_fields, extract, extract_document,
                       extract_with_highlights, verify_document)
@@ -22,15 +22,12 @@ def build_parser():
     parser.add_argument("--highlights", action="store_true",
                         help="extract what a reviewer highlighted on the PDF "
                              "into one workbook per document")
-    parser.add_argument("--combined", metavar="FILE", type=Path,
-                        help="write every document given to a single workbook "
-                             "instead of one per invoice")
-    parser.add_argument("--mandatory", metavar="FILE", type=Path,
+    parser.add_argument("--mandatory", action="store_true",
                         help="write the highlighted fields as the columns of "
-                             "the extract, one row per document and per item")
+                             "the extract, one workbook per document")
     parser.add_argument("--per-invoice", action="store_true",
-                        help="with --highlights, write one workbook per "
-                             "invoice rather than one per document")
+                        help="with --highlights or --mandatory, write one "
+                             "workbook per invoice rather than one per document")
     parser.add_argument("--all-fields", action="store_true",
                         help="write every field each document carries, "
                              "whether highlighted or not")
@@ -59,8 +56,8 @@ def main(argv=None):
             print(f"  {out}")
         return 0
 
-    if args.combined or args.mandatory:
-        return _combined(args)
+    if args.mandatory:
+        return _mandatory(args)
 
     failures = 0
     for pdf_path in args.pdfs:
@@ -129,9 +126,9 @@ def _verify(args):
     return 1 if failures else 0
 
 
-def _combined(args):
-    """Write every document given into one workbook."""
-    documents, failures = [], 0
+def _mandatory(args):
+    """The highlighted fields as columns, one workbook per document."""
+    failures = 0
     for pdf_path in args.pdfs:
         try:
             document = extract_document(pdf_path, with_highlights=True)
@@ -139,22 +136,28 @@ def _combined(args):
             print(f"{pdf_path}: {error}", file=sys.stderr)
             failures += 1
             continue
-        documents.append(document)
-        items = document.boe.all_items()
-        print(f"{pdf_path.name}: {document.boe.form_type}, "
-              f"BE {document.boe.be_number}, {len(document.boe.invoices)} invoice(s), "
-              f"{len(items)} line item(s), {len(document.highlights)} highlight(s)")
 
-    if not documents:
-        return 1
-    for out_path, writer in ((args.combined, write_combined),
-                             (args.mandatory, write_mandatory)):
-        if out_path is None:
-            continue
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        writer(documents, out_path)
-        print(f"  {out_path}  ({len(documents)} document(s))")
+        boe = document.boe
+        items = boe.all_items()
+        print(f"{pdf_path.name}: {boe.form_type}, BE {boe.be_number}, "
+              f"{len(boe.invoices)} invoice(s), {len(items)} line item(s), "
+              f"{len(document.highlights)} highlight(s)")
+        name = safe_name(boe.be_number or pdf_path.stem)
+        for invoice, out_path in _mandatory_paths(args, boe, name):
+            write_mandatory(document, out_path, invoice)
+            covered = invoice.items if invoice is not None else items
+            print(f"  {out_path}  ({len(covered)} line item(s))")
     return 1 if failures else 0
+
+
+def _mandatory_paths(args, boe, name):
+    """Where each mandatory workbook goes: one per document, or per invoice."""
+    if not args.per_invoice:
+        return [(None, args.output_dir / f"BOE__{name}__mandatory.xlsx")]
+    return [(invoice,
+             args.output_dir
+             / f"BOE__{name}__{safe_name(invoice.number or name)}__mandatory.xlsx")
+            for invoice in boe.invoices]
 
 
 if __name__ == "__main__":

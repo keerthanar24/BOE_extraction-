@@ -171,46 +171,28 @@ def test_workbook_records_every_highlight_verbatim(tmp_path, standard):
     assert sheet.max_row == len(highlights) + 1
 
 
-def test_combined_workbook_holds_every_document(tmp_path):
-    """One workbook per run, with every document side by side."""
+def test_each_document_gets_its_own_workbook(tmp_path):
+    """No sheet ever mixes two documents: one workbook per bill of entry."""
     from openpyxl import load_workbook
 
-    from boe_extraction.excel_writer import write_combined
+    from boe_extraction.excel_writer import write_mandatory
     from boe_extraction.extract import extract_document
 
-    documents = [extract_document(COURIER), extract_document(STANDARD)]
-    path = write_combined(documents, tmp_path / "combined.xlsx")
-    workbook = load_workbook(path)
-    assert workbook.sheetnames == ["Invoices", "Line Items",
-                                   "Highlighted Fields", "Highlights (raw)"]
-
-    # Every sheet names the document each row came from.
-    for name in workbook.sheetnames:
-        assert workbook[name]["A1"].value == "Document"
-
-    assert workbook["Invoices"].max_row == 4           # one courier, two ICEGATE
-    assert workbook["Line Items"].max_row == 14        # 4 + 9 items
-    assert workbook["Highlights (raw)"].max_row == 55 + 84 + 1
-
-
-def test_combined_totals_match_the_documents(tmp_path):
-    from openpyxl import load_workbook
-
-    from boe_extraction.excel_writer import write_combined
-    from boe_extraction.extract import extract_document
-
-    documents = [extract_document(COURIER), extract_document(STANDARD)]
-    path = write_combined(documents, tmp_path / "combined.xlsx")
-    sheet = load_workbook(path)["Invoices"]
-    rows = [r for r in sheet.iter_rows(min_row=2, values_only=True)]
-
-    courier = next(r for r in rows if r[0] == COURIER.name)
-    assert (courier[1], courier[7], courier[8], courier[9]) == (
-        "FBA15M6L9KGF01", 4, 104220, 45814)
-
-    standard = [r for r in rows if r[0] == STANDARD.name]
-    assert [r[1] for r in standard] == ["FBA15M13GSD3", "FBA15M16XHDH"]
-    assert sum(r[8] for r in standard) == 560008
+    # Only the courier form highlights a field that varies per line item, so
+    # only it earns a Mandatory Item Fields sheet.
+    expected = {COURIER: ["Mandatory Fields", "Mandatory Item Fields",
+                          "Line Items", "Field Checklist", "Highlights (raw)"],
+                STANDARD: ["Mandatory Fields", "Line Items", "Field Checklist",
+                           "Highlights (raw)"]}
+    for pdf in (COURIER, STANDARD):
+        document = extract_document(pdf)
+        path = write_mandatory(document, tmp_path / f"{pdf.stem}.xlsx")
+        workbook = load_workbook(path)
+        assert workbook.sheetnames == expected[pdf]
+        # A Document column is what a combined workbook needs; these have none.
+        for name in workbook.sheetnames:
+            assert workbook[name]["A1"].value != "Document"
+        assert workbook["Mandatory Fields"].max_row == 2      # header plus one
 
 
 def test_mandatory_workbook_uses_the_fields_as_columns(tmp_path):
@@ -220,40 +202,53 @@ def test_mandatory_workbook_uses_the_fields_as_columns(tmp_path):
     from boe_extraction.excel_writer import write_mandatory
     from boe_extraction.extract import extract_document
 
-    documents = [extract_document(COURIER), extract_document(STANDARD)]
-    path = write_mandatory(documents, tmp_path / "mandatory.xlsx")
-    workbook = load_workbook(path)
-    assert workbook.sheetnames == ["Mandatory Fields", "Mandatory Item Fields",
-                                   "Line Items", "Field Checklist",
-                                   "Highlights (raw)"]
+    def header_and_row(pdf):
+        path = write_mandatory(extract_document(pdf), tmp_path / f"{pdf.stem}.xlsx")
+        sheet = load_workbook(path)["Mandatory Fields"]
+        header = [c.value for c in sheet[1]]
+        row = next(sheet.iter_rows(min_row=2, values_only=True))
+        return header, row
 
-    sheet = workbook["Mandatory Fields"]
-    assert sheet.max_row == 3                      # header plus two documents
-    header = [c.value for c in sheet[1]]
-    assert header[:3] == ["Document", "Form Type", "BE Number"]
-    for column in ["CBEXIV Number", "TR-6 Challan Number", "1.BCD",
-                   "PARTICULARS OF THE IMPORTER · Name"]:
-        assert column in header
+    header, row = header_and_row(COURIER)
+    assert header[:2] == ["Form Type", "BE Number"]
+    assert row[header.index("CBEXIV Number")] == "CBEXIV_DEL_2026-2027_2808_10570"
+    assert row[header.index("TR-6 Challan Number")] == "2908387251"
 
-    rows = {r[0]: r for r in sheet.iter_rows(min_row=2, values_only=True)}
-    courier = rows[COURIER.name]
-    assert courier[header.index("CBEXIV Number")] == "CBEXIV_DEL_2026-2027_2808_10570"
-    assert courier[header.index("TR-6 Challan Number")] == "2908387251"
-    standard = rows[STANDARD.name]
-    assert standard[header.index("1.BCD")] == "84001.2"
-    assert standard[header.index("EXCHANGE RATE")] == "1 USD=96.05INR"
+    header, row = header_and_row(STANDARD)
+    assert row[header.index("1.BCD")] == "84001.2"
+    assert row[header.index("EXCHANGE RATE")] == "1 USD=96.05INR"
+    assert "PARTICULARS OF THE IMPORTER · Name" in header_and_row(COURIER)[0]
 
 
-def test_item_rows_cover_every_item_of_every_document(tmp_path):
+def test_item_rows_cover_every_item_of_the_document(tmp_path):
     from openpyxl import load_workbook
 
     from boe_extraction.excel_writer import write_mandatory
     from boe_extraction.extract import extract_document
 
-    documents = [extract_document(COURIER), extract_document(STANDARD)]
-    path = write_mandatory(documents, tmp_path / "mandatory.xlsx")
-    sheet = load_workbook(path)["Mandatory Item Fields"]
-    assert sheet.max_row == 4 + 9 + 1
+    for pdf, count in ((COURIER, 4), (STANDARD, 9)):
+        path = write_mandatory(extract_document(pdf), tmp_path / f"{pdf.stem}.xlsx")
+        sheet = load_workbook(path)["Line Items"]
+        assert sheet.max_row == count + 1
+
+
+def test_an_invoice_workbook_holds_only_that_invoice(tmp_path):
+    """BOE 3141398 carries two invoices; neither may reach the other's file."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_mandatory
+    from boe_extraction.extract import extract_document
+
+    document = extract_document(STANDARD)
+    assert [i.number for i in document.boe.invoices] == ["FBA15M13GSD3",
+                                                         "FBA15M16XHDH"]
+    for invoice, count in zip(document.boe.invoices, (5, 4)):
+        path = write_mandatory(document, tmp_path / f"{invoice.number}.xlsx",
+                               invoice)
+        workbook = load_workbook(path)
+        assert workbook["Line Items"].max_row == count + 1
+        # One invoice per file, so no sheet needs to name which invoice.
+        assert workbook["Line Items"]["A1"].value != "Invoice"
 
 
 def test_the_item_table_is_reported_on_line_items(standard):
