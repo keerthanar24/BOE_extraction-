@@ -212,24 +212,26 @@ def _write_document_invoices(sheet, document, invoice=None):
     Part II's per-invoice figures are reported here rather than among the
     document's fields, where only the first invoice's could ever show.
     """
-    sheet.append(["Invoice Number", "Invoice Date", "Supplier", "Invoice Value",
-                  "Currency", "Exchange Rate", "Line Items",
+    sheet.append(["BE No", "Invoice Number", "Invoice Date", "Supplier",
+                  "Invoice Value", "Currency", "Exchange Rate", "Line Items",
                   "Assessable Value", "Total Duty"])
     for one in ([invoice] if invoice is not None else document.boe.invoices):
-        sheet.append([one.number, one.date, one.supplier, one.invoice_value,
-                      one.currency, one.exchange_rate, len(one.items),
+        sheet.append([document.boe.be_number, one.number, one.date,
+                      one.supplier, one.invoice_value, one.currency,
+                      one.exchange_rate, len(one.items),
                       _totals(one.items, "assessable_value"),
                       _totals(one.items, "duty_amount")])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for index in range(1, 10):
+    for index in range(1, 11):
         sheet.column_dimensions[get_column_letter(index)].width = 18
-    sheet.column_dimensions["C"].width = 30
+    sheet.column_dimensions["A"].width = 34   # the courier BE numbers are long
+    sheet.column_dimensions["D"].width = 30
     for row in range(2, sheet.max_row + 1):
-        for index in (4, 8, 9):
+        for index in (5, 9, 10):
             sheet.cell(row=row, column=index).number_format = MONEY
-    sheet.freeze_panes = "B2"
+    sheet.freeze_panes = "C2"
 
 
 def _write_document_items(sheet, document, invoice=None):

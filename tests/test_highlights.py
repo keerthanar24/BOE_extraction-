@@ -360,6 +360,14 @@ def test_one_workbook_gives_each_document_its_own_sheets(tmp_path):
     for name in workbook.sheetnames:
         assert workbook[name]["A1"].value != "Document"
     assert workbook["Courier CBE-XIV Line Items"].max_row == 5      # 4 items
+
+    # Every invoice row names the bill of entry it was raised under.
+    invoices = workbook["Cargo BOE Invoices"]
+    assert [c.value for c in invoices[1]][:2] == ["BE No", "Invoice Number"]
+    assert [r[:2] for r in invoices.iter_rows(min_row=2, values_only=True)] == [
+        ("3141398", "FBA15M13GSD3"), ("3141398", "FBA15M16XHDH")]
+    assert workbook["Courier CBE-XIV Invoices"]["A2"].value == (
+        "CBEXIV_DEL_2026-2027_2808_10570")
     assert workbook["Cargo BOE Highlights"].max_row == 85
     assert workbook["Courier CBE-XIV Highlights"].max_row == 56
 
@@ -390,7 +398,8 @@ def test_per_invoice_sheets_split_a_multi_invoice_document(tmp_path):
                          ("FBA15M16XHDH", "FBA15M16XHDH")):
         sheet = workbook[f"{name} Invoices"]
         assert sheet.max_row == 2                       # header plus its own
-        assert sheet["A2"].value == number
+        assert [c.value for c in sheet[1]][:2] == ["BE No", "Invoice Number"]
+        assert (sheet["A2"].value, sheet["B2"].value) == ("3141398", number)
     assert workbook["FBA15M13GSD3 Line Items"].max_row == 6        # 5 items
     assert workbook["FBA15M16XHDH Line Items"].max_row == 5        # 4 items
     # Each invoice's sheet stands alone, so it need not name the invoice.
