@@ -78,16 +78,20 @@ def schema_extract(path):
     returns exactly the fields the schema names -- no more, and each one once.
     """
     from .cbe_grid import Cell, Marker, read_entries
+    from .highlight_fields import document_cells
     from .schema import document_rows, item_rows
 
     with pdfplumber.open(str(path)) as pdf:
         _, boe = _parse(pdf, path)
-        cells, section = [], ""
-        for entry in read_entries(pdf):
-            if isinstance(entry, Marker):
-                section = entry.text.rstrip(" :,")
-            elif isinstance(entry, Cell) and entry.label:
-                cells.append((section, entry.label, entry.value))
+        if boe.form_type == "ICEGATE BOE":
+            cells = document_cells(pdf, boe)
+        else:
+            cells, section = [], ""
+            for entry in read_entries(pdf):
+                if isinstance(entry, Marker):
+                    section = entry.text.rstrip(" :,")
+                elif isinstance(entry, Cell) and entry.label:
+                    cells.append((section, entry.label, entry.value))
 
     fields = document_rows(boe.form_type, cells)
     if fields is None:

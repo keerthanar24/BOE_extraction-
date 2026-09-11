@@ -275,6 +275,25 @@ def _split_and_clean(fields):
     return result
 
 
+def document_cells(pdf, boe):
+    """Every (section, label, value) the ICEGATE form prints, deterministically.
+
+    The highlight path resolves annotations against these same pairs; the
+    schema path reads them straight, and lets the schema decide which to keep.
+    A cell the parser reads better than the table reader -- the exchange rate,
+    printed as a two-row event log -- is taken from the parser here too.
+    """
+    headings = _part_headings(pdf)
+    first = next(iter(getattr(boe, "invoices", [])), None)
+    fields = []
+    for pair in read_tables(pdf):
+        override = FROM_PARSER.get(pair.label)
+        value = (override(boe, first) or pair.value) if override else pair.value
+        fields.append(Field(pair.page, pair.top, pair.label, value, "",
+                            _section_at(headings, pair.page, pair.top)))
+    return [(f.section, f.label, f.value) for f in _split_and_clean(fields)]
+
+
 def _item_blocks(pdf, boe):
     """Where each item's block starts, paired with the item itself.
 

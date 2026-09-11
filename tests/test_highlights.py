@@ -439,7 +439,8 @@ def test_the_schema_is_free_of_duplicates():
 
 
 @pytest.mark.parametrize("pdf,form,fields,items",
-                         [(COURIER, "CBE-XIV", 55, 4), (XIII, "CBE-XIII", 35, 44)])
+                         [(COURIER, "CBE-XIV", 55, 4), (XIII, "CBE-XIII", 35, 44),
+                          (STANDARD, "ICEGATE BOE", 51, 9)])
 def test_the_extract_carries_the_schema_and_nothing_else(tmp_path, pdf, form,
                                                          fields, items):
     from openpyxl import load_workbook
@@ -499,12 +500,46 @@ def test_every_schema_item_column_is_filled_where_the_form_fills_it():
         assert title in filled, title
 
 
+def test_one_workbook_holds_every_document_on_its_own_sheets(tmp_path):
+    """Combined into one file, never into one sheet."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_schema_combined
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import ITEM_FIELDS
+
+    extracts = [schema_extract(p) for p in (STANDARD, COURIER, XIII)]
+    path = write_schema_combined(extracts, tmp_path / "all.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == [
+        "Cargo BOE Fields", "Cargo BOE Line Items",
+        "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
+        "Courier CBE-XIII Fields", "Courier CBE-XIII Line Items"]
+    for name in workbook.sheetnames:
+        assert len(name) <= 31
+        # No sheet names a document, because no sheet holds more than one.
+        assert workbook[name]["A1"].value in ("Section", ITEM_FIELDS[0])
+    for name, rows in (("Cargo BOE Fields", 51), ("Cargo BOE Line Items", 9),
+                       ("Courier CBE-XIV Fields", 55),
+                       ("Courier CBE-XIII Line Items", 44)):
+        assert workbook[name].max_row == rows + 1
+
+
+def test_the_cargo_bill_reads_the_same_with_or_without_highlights():
+    """The schema path must not need a reviewer to have marked the PDF."""
+    from boe_extraction.extract import extract_with_highlights, schema_extract
+
+    _, highlighted, _ = extract_with_highlights(STANDARD)
+    _, fields, _ = schema_extract(STANDARD)
+    assert [(f.section, f.label, f.value) for f in highlighted] == fields
+
+
 def test_duty_amounts_add_up_on_every_item():
     """Total duty is the sum of the heads, which is the form's own check."""
     from boe_extraction.extract import schema_extract
     from boe_extraction.schema import ITEM_FIELDS
 
-    for pdf in (COURIER, XIII):
+    for pdf in (COURIER, XIII, STANDARD):
         _, _, rows = schema_extract(pdf)
         at = {title: index for index, title in enumerate(ITEM_FIELDS)}
         for row in rows:

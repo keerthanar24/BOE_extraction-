@@ -532,17 +532,7 @@ def write_workbook(documents, path, per_invoice=False):
     return path
 
 
-def write_schema(boe, fields, items, path):
-    """The schema's fields and line items: two sheets, nothing else.
-
-    Every field the schema names gets a row or a column, whether or not this
-    document filled it, and nothing the schema does not name is written.
-    """
-    from .schema import ITEM_FIELDS
-
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Document Fields"
+def _write_schema_fields(sheet, fields):
     sheet.append(["Section", "Field", "Value"])
     for section, label, value in fields:
         sheet.append([section, label, value])
@@ -552,7 +542,10 @@ def write_schema(boe, fields, items, path):
         sheet.column_dimensions[column].width = width
     sheet.freeze_panes = "C2"
 
-    lines = workbook.create_sheet("Line Items")
+
+def _write_schema_items(lines, items):
+    from .schema import ITEM_FIELDS
+
     lines.append(list(ITEM_FIELDS))
     for row in items:
         lines.append(row)
@@ -567,8 +560,50 @@ def write_schema(boe, fields, items, path):
                 lines.cell(row=row, column=index).number_format = MONEY
     lines.freeze_panes = "C2"
     lines.row_dimensions[1].height = 46
+
+
+def write_schema(boe, fields, items, path):
+    """One document's schema fields and line items: two sheets, nothing else.
+
+    Every field the schema names gets a row or a column, whether or not this
+    document filled it, and nothing the schema does not name is written.
+    """
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Document Fields"
+    _write_schema_fields(sheet, fields)
+    _write_schema_items(workbook.create_sheet("Line Items"), items)
     workbook.save(path)
     return path
+
+
+def write_schema_combined(extracts, path):
+    """Every document of a run in one workbook, each on its own sheets.
+
+    Combined into one file, never into one sheet: a sheet holds a single bill
+    of entry, and its name says which.
+    """
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    taken = set()
+    for boe, fields, items in extracts:
+        label = _unit_label(_Named(boe), None, taken)
+        # "Fields", not "Document Fields": with the form name in front, the
+        # longer word costs more than Excel's 31 characters allow.
+        _write_schema_fields(workbook.create_sheet(f"{label} Fields"), fields)
+        _write_schema_items(workbook.create_sheet(f"{label} Line Items"), items)
+    workbook.save(path)
+    return path
+
+
+class _Named:
+    """What _unit_label needs of a document: its bill of entry and a name."""
+
+    __slots__ = ("boe", "name")
+
+    def __init__(self, boe):
+        self.boe = boe
+        self.name = boe.source_file or boe.be_number or "document"
 
 
 def output_paths(boe, output_dir, stem=None):

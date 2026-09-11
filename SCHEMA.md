@@ -13,12 +13,19 @@ allow-list, and that is what enforces the three rules this extract is held to:
 
 ## What is written
 
-One workbook per document, two sheets, nothing else:
+    python -m boe_extraction.cli <pdf> [<pdf> ...] --schema --combined out.xlsx
+
+writes every document given into **one workbook**, each on its own two sheets:
 
 | Sheet | Shape |
 |---|---|
-| `Document Fields` | Section, Field, Value — one row per schema field |
-| `Line Items` | 44 columns — one row per line item |
+| `<form> Fields` | Section, Field, Value — one row per schema field |
+| `<form> Line Items` | 44 columns — one row per line item |
+
+Combined into one file, never into one sheet: a sheet holds a single bill of
+entry, and its name says which — `Cargo BOE`, `Courier CBE-XIV`,
+`Courier CBE-XIII`. Drop `--combined` to get one workbook per document
+instead, where the sheets are named `Document Fields` and `Line Items`.
 
 A field the form left blank still gets its row: the form asked, and an empty
 answer is an answer. Blank is written as blank, never as `0` — a duty head the
@@ -26,13 +33,19 @@ form does not carry reads empty, not zero.
 
 ## Field counts
 
-| Form | Document fields | Line item columns |
-|---|---|---|
-| CBE-XIV | 55 | 44 |
-| CBE-XIII | 35 | 44 |
+| Form | Sheet prefix | Document fields | Line item columns |
+|---|---|---|---|
+| ICEGATE BOE | `Cargo BOE` | 51 | 44 |
+| CBE-XIV | `Courier CBE-XIV` | 55 | 44 |
+| CBE-XIII | `Courier CBE-XIII` | 35 | 44 |
 
-The two forms name their header fields differently, so their document lists
-differ. The line item columns are one list across both.
+Each form names its header fields differently, so each has its own document
+list. The line item columns are one list across all three.
+
+The cargo list is the corrected one: the addresses read in full, and the seven
+Part II fields that repeat per invoice are not in it. It is read straight from
+the form, so the schema path does not need a reviewer to have highlighted the
+PDF first -- a test asserts the two paths return the same 51 fields.
 
 ## What was dropped, and what holds the value instead
 
