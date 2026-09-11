@@ -17,6 +17,9 @@ label -- Name, Address -- under several sections.
 #   Rate of Exchange    -> Exchange Rate
 #   Invoice Number      -> Invoice
 #   Currency of Invoice -> Currency of Unit Price
+# Part II repeats per invoice, so the fields it holds -- 1.INV VALUE and
+# 15.Term among them -- report the first invoice's. The Line Items sheet
+# names the invoice each item belongs to.
 # Dropped as not data: Charge Type is the constant heading "DUTY DETAILS", and
 # Charge Amount(in rs.) is the empty cell beside it.
 
@@ -164,6 +167,12 @@ ICEGATE_FIELDS = [
     ('PART - I - BILL OF ENTRY SUMMARY', '3.WBE SITE'),
     ('PART - I - BILL OF ENTRY SUMMARY', '4.WH CODE'),
     ('PART - I - BILL OF ENTRY SUMMARY', 'EXCHANGE RATE'),
+    # Empty until the bill is given out of charge, so a first copy reports
+    # both blank; the form names them, and they are read when filled.
+    ('PART - I - BILL OF ENTRY SUMMARY', 'OOC NO.'),
+    ('PART - I - BILL OF ENTRY SUMMARY', 'OOC DATE'),
+    ('PART - II - INVOICE & VALUATION DETAILS', '1.INV VALUE'),
+    ('PART - II - INVOICE & VALUATION DETAILS', '15.Term'),
     ('PART - II - INVOICE & VALUATION DETAILS', '4.LC NO & DATE'),
     ('PART - II - INVOICE & VALUATION DETAILS', '5.CONTRACT NO & DATE'),
     ('PART - II - INVOICE & VALUATION DETAILS', "1.BUYER'S NAME & ADDRESS"),

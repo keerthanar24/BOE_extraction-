@@ -40,7 +40,7 @@ MIN_INLINE_GAP = 4.5
 # Headings the form prints without a number.
 BARE_LABELS = ("Port Code", "BE No", "BE Date", "BE Type", "IEC/Br",
                "GSTIN/TYPE", "CB CODE", "PKG", "G.WT (KGS)", "AD CODE",
-               "EXCHANGE RATE")
+               "EXCHANGE RATE", "OOC NO.", "OOC DATE")
 
 
 class Column:
@@ -59,7 +59,7 @@ class Column:
         centre = (word["x0"] + word["x1"]) / 2
         return self.x0 - 6 <= centre < self.until
 
-    def split(self):
+    def split(self, limit=float("inf")):
         """Separate the heading from a value printed beside it.
 
         The form sets headings in bold and values in regular, so the value
@@ -67,15 +67,20 @@ class Column:
         ("6. AD CODE 6480001"); there the break is the first gap wider than the
         form's word spacing -- the first, not the widest, because in
         "15.Term CIF No" the widest gap falls after the value.
+
+        A line can also carry the value of a heading printed on the line above
+        it -- the "No" in "15.Term CIF No" answers 9.RELTD, one row up -- so
+        the value stops at `limit`, where that heading's own column begins.
         """
-        for index in range(1, len(self.words)):
-            if not is_bold(self.words[index]):
-                return _text(self.words[:index]), _text(self.words[index:])
-        for index in range(1, len(self.words)):
-            gap = self.words[index]["x0"] - self.words[index - 1]["x1"]
+        value = [w for w in self.words if w["x0"] < limit]
+        for index in range(1, len(value)):
+            if not is_bold(value[index]):
+                return _text(value[:index]), _text(value[index:])
+        for index in range(1, len(value)):
+            gap = value[index]["x0"] - value[index - 1]["x1"]
             if gap >= MIN_INLINE_GAP:
-                return _text(self.words[:index]), _text(self.words[index:])
-        return _text(self.words), ""
+                return _text(value[:index]), _text(value[index:])
+        return _text(value), ""
 
     @property
     def label(self):
@@ -157,6 +162,17 @@ def _separate(numbered, bare):
         column.rest = [w for w in owner.words if w["x0"] > column.x0]
         kept.append(column)
     return [c for c in numbered if c.words], kept
+
+
+def _next_column(above, column):
+    """Where the row above starts its next column, right of this one.
+
+    A heading whose value is printed on the line below leaves that line
+    carrying two cells: its own label and value, and the value belonging to
+    the heading above. This is the boundary between them.
+    """
+    beyond = [c.x0 for c in above if c.x0 > column.x0 + MIN_INLINE_GAP]
+    return min(beyond) if beyond else float("inf")
 
 
 def _value_lines(lines, index, heading):
@@ -338,7 +354,9 @@ def read_tables(pdf):
             # A heading's own words are its label only where values are
             # printed below it; beside them, the label stops at the value. So
             # the label is settled first, and the address blocks picked from it.
-            read = {id(c): ((_text(c.words), "") if below else c.split())
+            above = _numbered_columns(lines[index - 1]) if index else []
+            read = {id(c): ((_text(c.words), "") if below
+                            else c.split(_next_column(above, c)))
                     for c in columns}
             address = [c for c in columns
                        if ADDRESS_BLOCK.search(read[id(c)][0])]

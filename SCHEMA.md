@@ -47,15 +47,18 @@ form does not carry reads empty, not zero.
 
 | Form | Sheet prefix | Document fields | Line item columns |
 |---|---|---|---|
-| ICEGATE BOE | `Cargo BOE` | 51 | 44 |
+| ICEGATE BOE | `Cargo BOE` | 55 | 44 |
 | CBE-XIV | `Courier CBE-XIV` | 55 | 44 |
 | CBE-XIII | `Courier CBE-XIII` | 35 | 44 |
 
 Each form names its header fields differently, so each has its own document
 list. The line item columns are one list across all three.
 
-The cargo list is the corrected one: the addresses read in full, and the seven
-Part II fields that repeat per invoice are not in it. It is read straight from
+The cargo list carries the addresses in full. Of the Part II fields that
+repeat per invoice it keeps `1.INV VALUE` and `15.Term`, reporting the first
+invoice's; the rest are on the Line Items sheet, per invoice. `OOC NO.` and
+`OOC DATE` are named too: they are empty until the bill is given out of
+charge, so a first copy reports both blank. It is read straight from
 the form, so the schema path does not need a reviewer to have highlighted the
 PDF first -- a test asserts the two paths return the same 51 fields.
 

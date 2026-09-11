@@ -125,8 +125,7 @@ def test_standard_highlighted_header_fields(standard):
     # Part II repeats per invoice, so its figures are reported per invoice on
     # the Invoices and Line Items sheets, not once at document level.
     for label in ("2.INVOICE NO. & DT.", "3.PURCHASE ORDER NO & DT",
-                  "1.INV VALUE", "2.FREIGHT", "14.Cur", "15.Term",
-                  "14.ASS. VALUE"):
+                  "2.FREIGHT", "14.Cur", "14.ASS. VALUE"):
         assert label not in values
     invoice = standard[0].invoices[0]
     assert (invoice.number, invoice.invoice_value, invoice.currency) == (
@@ -440,7 +439,7 @@ def test_the_schema_is_free_of_duplicates():
 
 @pytest.mark.parametrize("pdf,form,fields,items",
                          [(COURIER, "CBE-XIV", 55, 4), (XIII, "CBE-XIII", 35, 44),
-                          (STANDARD, "ICEGATE BOE", 51, 9)])
+                          (STANDARD, "ICEGATE BOE", 55, 9)])
 def test_the_extract_carries_the_schema_and_nothing_else(tmp_path, pdf, form,
                                                          fields, items):
     from openpyxl import load_workbook
@@ -519,19 +518,30 @@ def test_one_workbook_holds_every_document_on_its_own_sheets(tmp_path):
         assert len(name) <= 31
         # No sheet names a document, because no sheet holds more than one.
         assert workbook[name]["A1"].value in ("Section", ITEM_FIELDS[0])
-    for name, rows in (("Cargo BOE Fields", 51), ("Cargo BOE Line Items", 9),
+    for name, rows in (("Cargo BOE Fields", 55), ("Cargo BOE Line Items", 9),
                        ("Courier CBE-XIV Fields", 55),
                        ("Courier CBE-XIII Line Items", 44)):
         assert workbook[name].max_row == rows + 1
 
 
 def test_the_cargo_bill_reads_the_same_with_or_without_highlights():
-    """The schema path must not need a reviewer to have marked the PDF."""
+    """The schema path must not need a reviewer to have marked the PDF.
+
+    The schema names four fields beyond what was highlighted -- the invoice
+    value, the term, and the two OOC boxes -- so it is a superset; every
+    field both paths carry must agree.
+    """
     from boe_extraction.extract import extract_with_highlights, schema_extract
 
     _, highlighted, _ = extract_with_highlights(STANDARD)
     _, fields, _ = schema_extract(STANDARD)
-    assert [(f.section, f.label, f.value) for f in highlighted] == fields
+    schema = {(section, label): value for section, label, value in fields}
+    assert len(highlighted) == 51 and len(fields) == 55
+    for field in highlighted:
+        assert schema[(field.section, field.label)] == field.value
+    added = set(schema) - {(f.section, f.label) for f in highlighted}
+    assert {label for _, label in added} == {
+        "1.INV VALUE", "15.Term", "OOC NO.", "OOC DATE"}
 
 
 def test_duty_amounts_add_up_on_every_item():
@@ -615,7 +625,7 @@ def test_the_run_produces_one_workbook_per_family(tmp_path):
 
     cargo = load_workbook(tmp_path / "Cargo_BOE_extract.xlsx")
     assert cargo.sheetnames == ["Cargo BOE Fields", "Cargo BOE Line Items"]
-    assert cargo["Cargo BOE Fields"].max_row == 52          # 51 fields
+    assert cargo["Cargo BOE Fields"].max_row == 56          # 55 fields
     assert cargo["Cargo BOE Line Items"].max_row == 10      # 9 items
 
     courier = load_workbook(tmp_path / "Courier_BOE_extract.xlsx")
@@ -643,7 +653,7 @@ def test_a_second_cargo_bill_reads_its_own_figures():
 
     boe, fields, items = schema_extract(SECOND_CARGO)
     assert (boe.form_type, boe.be_number) == ("ICEGATE BOE", "3036066")
-    assert len(fields) == 51 and len(items) == 12
+    assert len(fields) == 55 and len(items) == 12
 
     _, checks = verify_document(SECOND_CARGO)
     _, passed = report(checks, boe.form_type)
@@ -744,3 +754,43 @@ def test_a_blank_first_answer_still_yields_to_a_filled_one():
               document_rows("CBE-XIV", [])}
     assert values[importer] == ""
     assert len(values) == len(CBE_XIV_FIELDS)
+
+
+def test_the_cargo_bill_reports_its_invoice_value_term_and_ooc():
+    """Three fields the form carries that the extract must not leave out."""
+    from boe_extraction.extract import schema_extract
+
+    for pdf, value in ((STANDARD, "3050.3"), (SECOND_CARGO, "53913.88")):
+        boe, fields, _ = schema_extract(pdf)
+        values = {label: value for _, label, value in fields}
+
+        # Part II repeats per invoice, so this is the first invoice's.
+        assert values["1.INV VALUE"] == value
+        assert float(value) == boe.invoices[0].invoice_value
+
+        # "15.Term CIF No" prints 9.RELTD's answer on the same line, one row
+        # below its own heading. The term is CIF; the No is not part of it.
+        assert values["15.Term"] == "CIF"
+
+        # The form names both, and both are empty until the bill is given out
+        # of charge -- every sample here is a first copy.
+        assert values["OOC NO."] == ""
+        assert values["OOC DATE"] == ""
+
+
+def test_a_value_beside_its_label_stops_at_the_column_above_it():
+    from boe_extraction.icegate_tables import _next_column, _numbered_columns
+    from boe_extraction.pdf_text import upright_page, word_lines
+    import pdfplumber
+
+    with pdfplumber.open(STANDARD) as pdf:
+        lines = word_lines(upright_page(pdf.pages[1]))
+    term = next(line for line in lines
+                if line[0]["text"] == "15.Term")
+    above = next(line for line in lines if line[0]["text"] == "14.Cur")
+    column = _numbered_columns(term)[0]
+    # 9.RELTD is the first heading on the row above that starts to its right.
+    assert round(_next_column(_numbered_columns(above), column)) == 355
+    assert column.split(_next_column(_numbered_columns(above), column)) == (
+        "15.Term", "CIF")
+    assert column.split() == ("15.Term", "CIF No")   # unbounded, as before
