@@ -707,11 +707,12 @@ MULTI_INVOICE_COURIER = SAMPLES / "FBA15KYLH2XK_courier_cbe_xiv.pdf"
 from boe_extraction.schema import CBE_XIV_FIELDS
 
 
-def test_a_multi_invoice_courier_bill_reads_one_invoice_consistently():
-    """The per-invoice sections repeat, so the first invoice's must win.
+def test_a_multi_invoice_bill_reports_every_invoice():
+    """Every invoice of a bill, with its own date, lined up row for row.
 
-    Taking the last filled answer reported invoice 1's number and date beside
-    invoice 3's value, which describes no invoice the bill carries.
+    The form numbers each invoice's section -- "Details Of Invoice - 2" -- so
+    the same field landed under a different heading per invoice and only the
+    first was ever reported.
     """
     from boe_extraction.extract import schema_extract
 
@@ -721,10 +722,18 @@ def test_a_multi_invoice_courier_bill_reads_one_invoice_consistently():
         "FBA15KYL99C3", "FBA15KYL2S79", "FBA15KYLH2XK"]
 
     values = {label: value for _, label, value in fields}
-    first = boe.invoices[0]
-    assert values["Invoice Number"] == first.number == "FBA15KYL99C3"
-    assert values["Date of Invoice"] == first.date == "11/10/2025"
-    assert float(values["Invoice Value"]) == first.invoice_value == 945.4
+    numbers = values["Invoice Number"].split("\n")
+    dates = values["Date of Invoice"].split("\n")
+    amounts = values["Invoice Value"].split("\n")
+    assert numbers == [i.number for i in boe.invoices]
+    assert dates == [i.date for i in boe.invoices]
+    assert [float(a) for a in amounts] == [i.invoice_value for i in boe.invoices]
+    # Line n of each field is the same invoice, so the three read across.
+    assert list(zip(numbers, dates, amounts))[1] == (
+        "FBA15KYL2S79", "14/10/2025", "1027")
+
+    # A field every invoice answers the same is still reported once.
+    assert "\n" not in values["Terms of Invoice"] == "CIF"
 
     # Every item still names the invoice it belongs to.
     from boe_extraction.schema import ITEM_FIELDS
@@ -734,24 +743,28 @@ def test_a_multi_invoice_courier_bill_reads_one_invoice_consistently():
         "FBA15KYLH2XK", "FBA15KYLH2XK", "FBA15KYLH2XK"]
 
 
-def test_a_blank_first_answer_still_yields_to_a_filled_one():
-    """First-wins means the first *filled* answer, not the first seen."""
+def test_repeated_answers_collapse_only_when_they_agree():
+    """One answer per invoice, unless every invoice answered the same."""
     from boe_extraction.schema import document_rows
 
     # The forms reuse a label under several sections, so a field is keyed by
     # both -- these are the importer's Name, not the supplier's.
     importer = ("PARTICULARS OF THE IMPORTER", "Name")
-    values = {(section, label): value for section, label, value in
-              document_rows("CBE-XIV", [(*importer, ""), (*importer, "FILLED")])}
-    assert values[importer] == "FILLED"
 
-    values = {(section, label): value for section, label, value in
-              document_rows("CBE-XIV", [(*importer, "FIRST"), (*importer, "LATER")])}
-    assert values[importer] == "FIRST"
+    def report(*answers):
+        rows = document_rows("CBE-XIV", [(*importer, a) for a in answers])
+        return {(section, label): value for section, label, value in rows}[importer]
+
+    assert report("ONE") == "ONE"
+    assert report("SAME", "SAME", "SAME") == "SAME"      # collapsed
+    assert report("A", "B") == "A\nB"                    # kept apart
+    # A blank is an answer like any other, and holds its invoice's place.
+    assert report("", "B") == "\nB"
+    assert report("", "") == ""
 
     # A field the document never carries is still reported, blank.
-    values = {(section, label): value for section, label, value in
-              document_rows("CBE-XIV", [])}
+    rows = document_rows("CBE-XIV", [])
+    values = {(section, label): value for section, label, value in rows}
     assert values[importer] == ""
     assert len(values) == len(CBE_XIV_FIELDS)
 
@@ -760,13 +773,14 @@ def test_the_cargo_bill_reports_its_invoice_value_term_and_ooc():
     """Three fields the form carries that the extract must not leave out."""
     from boe_extraction.extract import schema_extract
 
-    for pdf, value in ((STANDARD, "3050.3"), (SECOND_CARGO, "53913.88")):
+    # Part II repeats per invoice, so a bill with two invoices reports both.
+    for pdf, value in ((STANDARD, "3050.3\n2780.08"), (SECOND_CARGO, "53913.88")):
         boe, fields, _ = schema_extract(pdf)
         values = {label: value for _, label, value in fields}
 
-        # Part II repeats per invoice, so this is the first invoice's.
         assert values["1.INV VALUE"] == value
-        assert float(value) == boe.invoices[0].invoice_value
+        assert [float(v) for v in value.split("\n")] == [
+            invoice.invoice_value for invoice in boe.invoices]
 
         # "15.Term CIF No" prints 9.RELTD's answer on the same line, one row
         # below its own heading. The term is CIF; the No is not part of it.

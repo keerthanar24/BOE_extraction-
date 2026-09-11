@@ -9,6 +9,8 @@ Each document field is a (section, label) pair, because the forms reuse a
 label -- Name, Address -- under several sections.
 """
 
+import re
+
 # Dropped as duplicates, and where the value is kept instead:
 #   BOE Number          -> ORIGINAL COPY - CBEXIV Number (same number twice)
 #   CTSH, CETSH         -> HS Code
@@ -62,10 +64,10 @@ CBE_XIV_FIELDS = [
     ('IMPORT GENERAL MANIFEST DETAILS', 'Type of Packages'),
     ('IMPORT GENERAL MANIFEST DETAILS', 'Gross Weight'),
     ('IMPORT GENERAL MANIFEST DETAILS', 'Unit of Measure for Gross Weight'),
-    ('Details Of Invoice - 1', 'Date of Invoice'),
-    ('Details Of Invoice - 1', 'Invoice Number'),
-    ('Details Of Invoice - 1', 'Date of Purchase Order'),
-    ('Details Of Invoice - 1', 'Purchase Order Number'),
+    ('Details Of Invoice', 'Date of Invoice'),
+    ('Details Of Invoice', 'Invoice Number'),
+    ('Details Of Invoice', 'Date of Purchase Order'),
+    ('Details Of Invoice', 'Purchase Order Number'),
     ('SUPPLIER DETAILS', 'Address'),
     ('SUPPLIER DETAILS', 'Name'),
     ('IF SUPPLIER IS NOT THE SELLER', 'Address'),
@@ -242,6 +244,18 @@ ITEM_FIELDS = [
 ]
 
 
+# The courier form numbers each invoice's own section -- "Details Of Invoice
+# - 2" -- so the same field lands under a different heading per invoice. It is
+# one section; the invoice it covers is not part of its name.
+INVOICE_SECTION = re.compile(r"^(Details\s+Of\s+Invoice)\s*-\s*\d+$",
+                             re.IGNORECASE)
+
+
+def section_name(text):
+    """A section's name, with the invoice it covers taken out of it."""
+    return INVOICE_SECTION.sub(r"\1", text.strip())
+
+
 def document_fields_for(form_type):
     """The schema's document fields for a form, or None if it has no schema."""
     return DOCUMENT_FIELDS.get(form_type)
@@ -255,25 +269,34 @@ def document_rows(form_type, cells):
     the document leaves blank still gets its row, because an empty cell is an
     answer -- the form asked and the filer left it empty.
 
-    Where a bill carries several invoices the per-invoice sections repeat, and
-    what is reported here is the first invoice's. The Line Items sheet names
-    the invoice each item belongs to.
+    Where a bill carries several invoices the per-invoice sections repeat.
+    A field that answers the same for every invoice is reported once; one
+    that differs reports every answer, in invoice order, a line each. So the
+    invoice numbers and their dates line up row for row, while a supplier
+    shared by all of them is not printed three times.
     """
     wanted = DOCUMENT_FIELDS.get(form_type)
     if wanted is None:
         return None
     found = {}
     for section, label, value in cells:
-        key = (section, label)
-        # A section repeats where a bill carries several invoices, so the
-        # first answer is kept: the fields then all describe invoice 1,
-        # rather than the number coming from the first and the value from
-        # the last. A blank first answer still yields to a filled later one.
-        if found.get(key):
-            continue
-        found[key] = value
-    return [(section, label, found.get((section, label), ""))
+        found.setdefault((section, label), []).append(value)
+    return [(section, label, _answer(found.get((section, label), [])))
             for section, label in wanted]
+
+
+def _answer(answers):
+    """What a field reports, given every answer the document gave it.
+
+    One answer, or the same answer each time, reports itself. Answers that
+    differ are all reported, in the order the form prints them, so that two
+    fields of the same invoice stay on the same line as each other.
+    """
+    if not answers:
+        return ""
+    if len(set(answers)) == 1:
+        return answers[0]
+    return "\n".join(answers)
 
 
 # The two courier forms word some item labels differently. A column is one

@@ -542,6 +542,11 @@ def _write_schema_fields(sheet, fields):
         sheet.append([section, label, value])
     for cell in sheet[1]:
         cell.font = Font(bold=True)
+    # A field a bill answers once per invoice reports a line per invoice, so
+    # the value column wraps rather than showing only the first.
+    for row in range(2, sheet.max_row + 1):
+        sheet.cell(row=row, column=3).alignment = Alignment(
+            vertical="top", wrap_text=True)
     for column, width in zip("ABC", (34, 40, 70)):
         sheet.column_dimensions[column].width = width
     sheet.freeze_panes = "C2"

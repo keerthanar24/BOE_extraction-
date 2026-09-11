@@ -43,6 +43,29 @@ A field the form left blank still gets its row: the form asked, and an empty
 answer is an answer. Blank is written as blank, never as `0` — a duty head the
 form does not carry reads empty, not zero.
 
+## A bill with more than one invoice
+
+The per-invoice sections repeat, once per invoice. A field every invoice
+answers the same is reported once; a field whose answers differ reports all of
+them, in invoice order, a line each — so the numbers, dates and values read
+across:
+
+| Field | Value |
+|---|---|
+| `Invoice Number` | FBA15KYL99C3 ⏎ FBA15KYL2S79 ⏎ FBA15KYLH2XK |
+| `Date of Invoice` | 11/10/2025 ⏎ 14/10/2025 ⏎ 11/10/2025 |
+| `Invoice Value` | 945.4 ⏎ 1027 ⏎ 1437.2 |
+| `Terms of Invoice` | CIF *(one line — all three agree)* |
+
+Line 2 of each is invoice 2. The cargo bill works the same way: `1.INV VALUE`
+on BE 3141398 reads `3050.3 ⏎ 2780.08`.
+
+The CBE-XIV numbers each invoice's own heading, `Details Of Invoice - 2`, and
+Part II of the cargo bill names the invoices it covers, `(Invoice 1 2 )`. The
+invoice is not part of the section's name, so both are stripped before the
+fields are matched — otherwise the same field lands under a different heading
+per invoice and only the first is ever reported.
+
 ## Field counts
 
 | Form | Sheet prefix | Document fields | Line item columns |
