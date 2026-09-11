@@ -245,6 +245,10 @@ def document_rows(form_type, cells):
     fragment or a declaration paragraph can never reach the extract. A field
     the document leaves blank still gets its row, because an empty cell is an
     answer -- the form asked and the filer left it empty.
+
+    Where a bill carries several invoices the per-invoice sections repeat, and
+    what is reported here is the first invoice's. The Line Items sheet names
+    the invoice each item belongs to.
     """
     wanted = DOCUMENT_FIELDS.get(form_type)
     if wanted is None:
@@ -252,8 +256,12 @@ def document_rows(form_type, cells):
     found = {}
     for section, label, value in cells:
         key = (section, label)
-        if key in found and not value:
-            continue          # a later blank must not overwrite a filled cell
+        # A section repeats where a bill carries several invoices, so the
+        # first answer is kept: the fields then all describe invoice 1,
+        # rather than the number coming from the first and the value from
+        # the last. A blank first answer still yields to a filled later one.
+        if found.get(key):
+            continue
         found[key] = value
     return [(section, label, found.get((section, label), ""))
             for section, label in wanted]

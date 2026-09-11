@@ -690,3 +690,57 @@ def test_two_address_blocks_side_by_side_stay_apart():
     # code, and must take neither.
     assert values["1.IMPORTER NAME & ADDRESS"].endswith("BANGALORE, 560009")
     assert values["2.CB NAME"] == "CLASSIC CLEARING & FORWARDING PVT.LTD."
+
+
+MULTI_INVOICE_COURIER = SAMPLES / "FBA15KYLH2XK_courier_cbe_xiv.pdf"
+
+from boe_extraction.schema import CBE_XIV_FIELDS
+
+
+def test_a_multi_invoice_courier_bill_reads_one_invoice_consistently():
+    """The per-invoice sections repeat, so the first invoice's must win.
+
+    Taking the last filled answer reported invoice 1's number and date beside
+    invoice 3's value, which describes no invoice the bill carries.
+    """
+    from boe_extraction.extract import schema_extract
+
+    boe, fields, rows = schema_extract(MULTI_INVOICE_COURIER)
+    assert boe.form_type == "CBE-XIV"
+    assert [i.number for i in boe.invoices] == [
+        "FBA15KYL99C3", "FBA15KYL2S79", "FBA15KYLH2XK"]
+
+    values = {label: value for _, label, value in fields}
+    first = boe.invoices[0]
+    assert values["Invoice Number"] == first.number == "FBA15KYL99C3"
+    assert values["Date of Invoice"] == first.date == "11/10/2025"
+    assert float(values["Invoice Value"]) == first.invoice_value == 945.4
+
+    # Every item still names the invoice it belongs to.
+    from boe_extraction.schema import ITEM_FIELDS
+    at = ITEM_FIELDS.index("Invoice")
+    assert [row[at] for row in rows] == [
+        "FBA15KYL99C3", "FBA15KYL99C3", "FBA15KYL2S79", "FBA15KYL2S79",
+        "FBA15KYLH2XK", "FBA15KYLH2XK", "FBA15KYLH2XK"]
+
+
+def test_a_blank_first_answer_still_yields_to_a_filled_one():
+    """First-wins means the first *filled* answer, not the first seen."""
+    from boe_extraction.schema import document_rows
+
+    # The forms reuse a label under several sections, so a field is keyed by
+    # both -- these are the importer's Name, not the supplier's.
+    importer = ("PARTICULARS OF THE IMPORTER", "Name")
+    values = {(section, label): value for section, label, value in
+              document_rows("CBE-XIV", [(*importer, ""), (*importer, "FILLED")])}
+    assert values[importer] == "FILLED"
+
+    values = {(section, label): value for section, label, value in
+              document_rows("CBE-XIV", [(*importer, "FIRST"), (*importer, "LATER")])}
+    assert values[importer] == "FIRST"
+
+    # A field the document never carries is still reported, blank.
+    values = {(section, label): value for section, label, value in
+              document_rows("CBE-XIV", [])}
+    assert values[importer] == ""
+    assert len(values) == len(CBE_XIV_FIELDS)
