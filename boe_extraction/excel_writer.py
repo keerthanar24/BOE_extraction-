@@ -532,6 +532,45 @@ def write_workbook(documents, path, per_invoice=False):
     return path
 
 
+def write_schema(boe, fields, items, path):
+    """The schema's fields and line items: two sheets, nothing else.
+
+    Every field the schema names gets a row or a column, whether or not this
+    document filled it, and nothing the schema does not name is written.
+    """
+    from .schema import ITEM_FIELDS
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Document Fields"
+    sheet.append(["Section", "Field", "Value"])
+    for section, label, value in fields:
+        sheet.append([section, label, value])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for column, width in zip("ABC", (34, 40, 70)):
+        sheet.column_dimensions[column].width = width
+    sheet.freeze_panes = "C2"
+
+    lines = workbook.create_sheet("Line Items")
+    lines.append(list(ITEM_FIELDS))
+    for row in items:
+        lines.append(row)
+    for cell in lines[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for index, title in enumerate(ITEM_FIELDS, start=1):
+        letter = get_column_letter(index)
+        lines.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
+        if title in MONEY_COLUMNS:
+            for row in range(2, lines.max_row + 1):
+                lines.cell(row=row, column=index).number_format = MONEY
+    lines.freeze_panes = "C2"
+    lines.row_dimensions[1].height = 46
+    workbook.save(path)
+    return path
+
+
 def output_paths(boe, output_dir, stem=None):
     """The workbook path for each invoice in the document."""
     paths = []

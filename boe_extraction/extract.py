@@ -71,6 +71,32 @@ def document_fields(path):
     return boe, rows
 
 
+def schema_extract(path):
+    """A document read into the named schema: its fields and its line items.
+
+    Unlike document_fields, which reports whatever the form prints, this
+    returns exactly the fields the schema names -- no more, and each one once.
+    """
+    from .cbe_grid import Cell, Marker, read_entries
+    from .schema import document_rows, item_rows
+
+    with pdfplumber.open(str(path)) as pdf:
+        _, boe = _parse(pdf, path)
+        cells, section = [], ""
+        for entry in read_entries(pdf):
+            if isinstance(entry, Marker):
+                section = entry.text.rstrip(" :,")
+            elif isinstance(entry, Cell) and entry.label:
+                cells.append((section, entry.label, entry.value))
+
+    fields = document_rows(boe.form_type, cells)
+    if fields is None:
+        raise ValueError(f"{Path(path).name}: no schema for {boe.form_type}")
+    from .model import ITEM_COLUMNS
+    items = item_rows(boe, {title: name for name, title in ITEM_COLUMNS})
+    return boe, fields, items
+
+
 def verify_document(path):
     """Parse a document and check it against the totals it declares."""
     from .verify import verify

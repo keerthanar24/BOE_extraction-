@@ -1,0 +1,218 @@
+"""The fields the extract carries, and nothing else.
+
+The ECCS courier forms are fixed government layouts, so what is wanted from
+them is a named list rather than whatever a given document happens to print.
+Naming the fields here is what keeps the extract free of fields nobody asked
+for, and free of the same value appearing under two headings.
+
+Each document field is a (section, label) pair, because the forms reuse a
+label -- Name, Address -- under several sections.
+"""
+
+# Dropped as duplicates, and where the value is kept instead:
+#   BOE Number          -> ORIGINAL COPY - CBEXIV Number (same number twice)
+#   CTSH, CETSH         -> HS Code
+#   Description of Goods-> Description
+#   Duty(Rs.)           -> Duty Amount
+#   Rate of Exchange    -> Exchange Rate
+#   Invoice Number      -> Invoice
+#   Currency of Invoice -> Currency of Unit Price
+# Dropped as not data: Charge Type is the constant heading "DUTY DETAILS", and
+# Charge Amount(in rs.) is the empty cell beside it.
+
+CBE_XIV_FIELDS = [
+    ('ORIGINAL COPY', 'Current Status of the CBE'),
+    ('ORIGINAL COPY', 'CBEXIV Number'),
+    ('DETAILS OF AUTHORIZED COURIER', 'Courier Registration Number'),
+    ('DETAILS OF AUTHORIZED COURIER', 'Name of the Authorized Courier'),
+    ('DETAILS OF AUTHORIZED COURIER', 'Address of Authorized Courier'),
+    ('PARTICULARS OF THE IMPORTER', 'Import Export Branch Code'),
+    ('PARTICULARS OF THE IMPORTER', 'Import export Code'),
+    ('PARTICULARS OF THE IMPORTER', 'Address'),
+    ('PARTICULARS OF THE IMPORTER', 'Name'),
+    ('PARTICULARS OF THE IMPORTER', 'Category Of Importer'),
+    ('PARTICULARS OF THE IMPORTER', 'Type Of Importer'),
+    ('PARTICULARS OF THE IMPORTER', 'Authorised Dealer Code Of Bank'),
+    ('PARTICULARS OF THE IMPORTER', 'Class Code'),
+    ('PARTICULARS OF THE IMPORTER', 'BOE Date'),
+    ('PARTICULARS OF THE IMPORTER', 'Category Of BOE'),
+    ('PARTICULARS OF THE IMPORTER', 'Type Of BOE'),
+    ('PARTICULARS OF THE IMPORTER', 'Whether Import Using eCommerce'),
+    ('PARTICULARS OF THE IMPORTER', 'KYC Document'),
+    ('PARTICULARS OF THE IMPORTER', 'KYC ID'),
+    ('PARTICULARS OF THE IMPORTER', 'State Code'),
+    ('SPECIAL REQUESTS', 'Country of Consignment'),
+    ('SPECIAL REQUESTS', 'Country of Origin'),
+    ('IGM DETAILS', 'Airlines'),
+    ('IGM DETAILS', 'Airport Of Arrival'),
+    ('IGM DETAILS', 'Date Of Arrival'),
+    ('IGM DETAILS', 'Flight No.'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Date of Entry Inward'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Import General Manifest (IGM) Number'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Date Of MAWB'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Master Airway Bill (MAWB) Number'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Date of HAWB'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'House Airway Bill (HAWB) Number'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Marks and Numbers'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Number of Packages'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Interest Amount'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Type of Packages'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Gross Weight'),
+    ('IMPORT GENERAL MANIFEST DETAILS', 'Unit of Measure for Gross Weight'),
+    ('Details Of Invoice - 1', 'Date of Invoice'),
+    ('Details Of Invoice - 1', 'Invoice Number'),
+    ('Details Of Invoice - 1', 'Date of Purchase Order'),
+    ('Details Of Invoice - 1', 'Purchase Order Number'),
+    ('SUPPLIER DETAILS', 'Address'),
+    ('SUPPLIER DETAILS', 'Name'),
+    ('IF SUPPLIER IS NOT THE SELLER', 'Address'),
+    ('IF SUPPLIER IS NOT THE SELLER', 'Name'),
+    ('BROKER/ AGENT DETAILS', 'Address'),
+    ('BROKER/ AGENT DETAILS', 'Name'),
+    ('BROKER/ AGENT DETAILS', 'Method of Valuation'),
+    ('BROKER/ AGENT DETAILS', 'Terms of Invoice'),
+    ('BROKER/ AGENT DETAILS', 'Currency'),
+    ('BROKER/ AGENT DETAILS', 'Invoice Value'),
+    ('PAYMENT DETAILS', 'Challan Date'),
+    ('PAYMENT DETAILS', 'TR-6 Challan Number'),
+    ('PAYMENT DETAILS', 'Total Amount'),
+]
+
+CBE_XIII_FIELDS = [
+    ('ORIGINAL COPY', 'Current Status of the CBE'),
+    # The form prints this label without its colon, so it reaches the schema
+    # only because the schema names it. It is the form's own BE number, the
+    # counterpart of CBE-XIV's CBEXIV Number.
+    ('ORIGINAL COPY', 'CBE-XIII Number'),
+    ('ORIGINAL COPY', 'Courier Registration Number'),
+    ('ORIGINAL COPY', 'Name of the Authorized Courier'),
+    ('ORIGINAL COPY', 'Address of Authorized Courier'),
+    ('IGM DETAILS', 'Airlines'),
+    ('IGM DETAILS', 'Flight No.'),
+    ('IGM DETAILS', 'Airport Of Arrival'),
+    ('IGM DETAILS', 'First Port Of Arrival'),
+    ('IGM DETAILS', 'Date Of Arrival'),
+    ('IGM DETAILS', 'Time Of Arrival'),
+    ('IGM DETAILS', 'Airport of Shipment'),
+    ('IGM DETAILS', 'Country of Exportation'),
+    ('IGM DETAILS', 'HAWB Number'),
+    ('IGM DETAILS', 'Name of Consignor'),
+    ('IGM DETAILS', 'Address of Consignor'),
+    ('IGM DETAILS', 'Name of Consignee'),
+    ('IGM DETAILS', 'Address of Consignee'),
+    ('IGM DETAILS', 'Import Export Code'),
+    ('IGM DETAILS', 'IEC Branch Code'),
+    ('IGM DETAILS', 'Special Request'),
+    ('IGM DETAILS', 'No of Packages'),
+    ('IGM DETAILS', 'Gross Weight'),
+    ('IGM DETAILS', 'Net Weight'),
+    ('IGM DETAILS', 'Assessable Value'),
+    ('IGM DETAILS', 'Duty(Rs.)'),
+    ('IGM DETAILS', 'Invoice Value'),
+    ('IGM DETAILS', 'Case of CRN'),
+    ('IGM DETAILS', 'KYC Document'),
+    ('IGM DETAILS', 'KYC ID'),
+    ('IGM DETAILS', 'State Code'),
+    ('IGM DETAILS', 'Interest Amount'),
+    ('IGM DETAILS', 'Government / NonGovernment'),
+    ('IGM DETAILS', 'AD Code'),
+    ('IGM DETAILS', 'Import Using e-Commerce'),
+]
+
+DOCUMENT_FIELDS = {"CBE-XIV": CBE_XIV_FIELDS, "CBE-XIII": CBE_XIII_FIELDS}
+
+# One row per line item. The columns the model exposes as attributes come
+# first; the rest are read from the item's own label/value cells.
+ITEM_FIELDS = [
+    'Invoice',
+    'Item Number',
+    'HS Code',
+    'Description',
+    'Quantity',
+    'Unit of Measure',
+    'Unit Price',
+    'Assessable Value',
+    'Notification number',
+    'serial number of notification',
+    'BCD Rate',
+    'BCD Specific rate',
+    'BCD Amount',
+    'SWS Rate',
+    'SWS Amount',
+    'IGST Rate',
+    'IGST Amount',
+    'AIDC Rate',
+    'AIDC Amount',
+    'ADD Rate',
+    'ADD Amount',
+    'CHCESS rate',
+    'CHCESS Amount',
+    'CESS rate',
+    'CESS Amount',
+    'CMPNSTRY Rate',
+    'CMPNSTRY Amount',
+    'Duty Amount',
+    'Exchange Rate',
+    'License Type',
+    'License Number',
+    'Country of Origin',
+    'Name of Manufacturer',
+    'Address of Manufacturer',
+    'Number of Packages',
+    'Marks on Packages',
+    'Invoice Value',
+    'Currency of Unit Price',
+    'Invoice Term',
+    'Landing Charges',
+    'Insurance',
+    'Freight',
+    'Discount Amount',
+    'Currency of Discount',
+]
+
+
+def document_fields_for(form_type):
+    """The schema's document fields for a form, or None if it has no schema."""
+    return DOCUMENT_FIELDS.get(form_type)
+
+
+def document_rows(form_type, cells):
+    """Fill the schema's document fields from the cells a document carries.
+
+    The schema is the allow-list: only a named field is read, so a table
+    fragment or a declaration paragraph can never reach the extract. A field
+    the document leaves blank still gets its row, because an empty cell is an
+    answer -- the form asked and the filer left it empty.
+    """
+    wanted = DOCUMENT_FIELDS.get(form_type)
+    if wanted is None:
+        return None
+    found = {}
+    for section, label, value in cells:
+        key = (section, label)
+        if key in found and not value:
+            continue          # a later blank must not overwrite a filled cell
+        found[key] = value
+    return [(section, label, found.get((section, label), ""))
+            for section, label in wanted]
+
+
+def item_rows(boe, columns_by_title):
+    """One row per line item, in the schema's column order.
+
+    A column is either something the model parsed onto the item, or one of the
+    item's own label/value cells read straight off the form.
+    """
+    rows = []
+    for invoice in boe.invoices:
+        for item in invoice.items:
+            row = []
+            for title in ITEM_FIELDS:
+                if title == "Invoice":
+                    row.append(invoice.number)
+                elif title in columns_by_title:
+                    row.append(getattr(item, columns_by_title[title]))
+                else:
+                    row.append(item.details.get(title) or None)
+            rows.append(row)
+    return rows

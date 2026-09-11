@@ -420,3 +420,95 @@ def test_a_sheet_name_stays_within_the_excel_limit(tmp_path):
     assert len(names) == len(set(names))
     for name in names:
         assert len(name) <= SHEET_NAME_LIMIT
+
+
+def test_the_schema_is_free_of_duplicates():
+    """No field is named twice, and no value appears under two names."""
+    from boe_extraction.schema import (CBE_XIII_FIELDS, CBE_XIV_FIELDS,
+                                       ITEM_FIELDS)
+
+    for fields in (CBE_XIV_FIELDS, CBE_XIII_FIELDS):
+        assert len(fields) == len(set(fields))
+    assert len(ITEM_FIELDS) == len(set(ITEM_FIELDS))
+    # The columns that repeated another column's value on every item.
+    for dropped in ("CTSH", "CETSH", "Description of Goods", "Duty(Rs.)",
+                    "Rate of Exchange", "Invoice Number", "Currency of Invoice",
+                    "Charge Type", "Charge Amount(in rs.)"):
+        assert dropped not in ITEM_FIELDS
+    assert ("PARTICULARS OF THE IMPORTER", "BOE Number") not in CBE_XIV_FIELDS
+
+
+@pytest.mark.parametrize("pdf,form,fields,items",
+                         [(COURIER, "CBE-XIV", 55, 4), (XIII, "CBE-XIII", 35, 44)])
+def test_the_extract_carries_the_schema_and_nothing_else(tmp_path, pdf, form,
+                                                         fields, items):
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_schema
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import DOCUMENT_FIELDS, ITEM_FIELDS
+
+    boe, document, rows = schema_extract(pdf)
+    assert boe.form_type == form
+    assert [(s, l) for s, l, _ in document] == DOCUMENT_FIELDS[form]
+    assert len(document) == fields
+    assert len(rows) == items
+
+    path = write_schema(boe, document, rows, tmp_path / "extract.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Document Fields", "Line Items"]
+    assert workbook["Document Fields"].max_row == fields + 1
+    assert [c.value for c in workbook["Line Items"][1]] == list(ITEM_FIELDS)
+    assert workbook["Line Items"].max_row == items + 1
+
+
+def test_a_wrapped_label_keeps_the_whole_value(tmp_path):
+    """The form wraps a label with its colon on the last line.
+
+    "Address of Authorized" over "Courier :" was read as a label "Courier"
+    starting at the second line, which lost the first line of the address.
+    """
+    from boe_extraction.extract import schema_extract
+
+    _, document, _ = schema_extract(XIII)
+    values = {label: value for _, label, value in document}
+    assert values["Address of Authorized Courier"] == (
+        "E 149 GROUND FLOOR WEST PATEL NAGARN/ ANEW DELHIDELHI110008")
+    assert values["Name of the Authorized Courier"] == "KBR INTERNATIONAL LOGISTICS"
+    # The form prints this label without a colon, so only the schema naming it
+    # brings it through.
+    assert values["CBE-XIII Number"] == "CBEXIII_DEL_2026-2027_2707_14754"
+    # A centred heading with a lower-case qualifier -- "DETAILS OF CRN (if
+    # present)" -- used to be read as this empty field's value.
+    assert values["Import Using e-Commerce"] == ""
+
+
+def test_every_schema_item_column_is_filled_where_the_form_fills_it():
+    """A column the form answers must not come back empty for every item."""
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import ITEM_FIELDS
+
+    _, _, rows = schema_extract(XIII)
+    filled = {title for index, title in enumerate(ITEM_FIELDS)
+              if any(row[index] not in (None, "") for row in rows)}
+    for title in ("Invoice", "HS Code", "Description", "Quantity", "Unit Price",
+                  "Assessable Value", "BCD Rate", "BCD Amount", "SWS Amount",
+                  "IGST Amount", "Duty Amount", "Exchange Rate",
+                  "Country of Origin", "Name of Manufacturer", "Invoice Term",
+                  "Notification number", "serial number of notification"):
+        assert title in filled, title
+
+
+def test_duty_amounts_add_up_on_every_item():
+    """Total duty is the sum of the heads, which is the form's own check."""
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import ITEM_FIELDS
+
+    for pdf in (COURIER, XIII):
+        _, _, rows = schema_extract(pdf)
+        at = {title: index for index, title in enumerate(ITEM_FIELDS)}
+        for row in rows:
+            heads = sum(row[at[f"{head} Amount"]] or 0
+                        for head in ("BCD", "SWS", "IGST", "AIDC", "ADD",
+                                     "CHCESS", "CESS", "CMPNSTRY"))
+            assert abs(heads - (row[at["Duty Amount"]] or 0)) <= 1.0

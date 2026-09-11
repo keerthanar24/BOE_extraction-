@@ -38,7 +38,10 @@ MAX_HEADING_GAP = 40
 
 SECTION_MARKER = re.compile(
     r"^(Details\s+Of\s+(?:Item|Invoice)\s*-\s*\d+|ITEM\s*:)$", re.IGNORECASE)
-HEADING_TEXT = re.compile(r"^[A-Z0-9][A-Z0-9 ()\[\]/,.&:;'\-]{7,}$")
+# A centred all-caps heading, which may carry a lower-case qualifier in
+# brackets -- "DETAILS OF CRN (if present)".
+HEADING_TEXT = re.compile(r"^[A-Z0-9][A-Z0-9 ()\[\]/,.&:;'\-]{7,}"
+                          r"(?:\([A-Za-z][A-Za-z ]*\))?$")
 PAGE_FOOTER = re.compile(r"^Page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
 
 
@@ -239,7 +242,18 @@ class _Column:
         self.entries = entries
         self.current = None
 
-    def add(self, page, top, label, value):
+    def continues_label(self, label):
+        """Whether this label fragment finishes the label already being read.
+
+        The form right-aligns a label to its colon column, so a long one wraps
+        with the colon left on the last fragment -- "Address of Authorized"
+        over "Courier :". A fragment only continues a cell whose own label has
+        not reached its colon yet.
+        """
+        return bool(label) and self.current is not None and bool(
+            self.current.label) and not self.current.label_done
+
+    def add(self, page, top, label, value, continuation=False):
         """Place a line's label and value fragments into this column.
 
         Not every label on these forms ends in a colon ("Marks on Packages 0"),
@@ -249,12 +263,14 @@ class _Column:
         alone is the rest of a label wrapped onto a second line
         ("Import Export Branch" / "Code:").
 
-        The exception is a value broken across lines with a hyphen, where the
-        label wraps with it ("Name of the Authorized" / "Courier:" holding
-        "KBR INTERNATIONAL LO-" / "GISTICS"). Those are one row.
+        The exception is a label still being read, which `continuation` marks,
+        or a value broken across lines with a hyphen, where the label wraps
+        with it ("Name of the Authorized" / "Courier:" holding "KBR
+        INTERNATIONAL LO-" / "GISTICS"). Those are one row.
         """
         if label:
-            wrapping = self.current is not None and self.current.value.endswith("-")
+            wrapping = continuation or (
+                self.current is not None and self.current.value.endswith("-"))
             starts_row = self.current is not None and self.current.value and (
                 bool(value) or not self.current.label) and not wrapping
             if self.current is None or self.current.label_done or starts_row:
@@ -341,8 +357,17 @@ def read_entries(pdf):
             value_words, right_label_words = _split_off_label(
                 middle, left_column, right_column)
 
-            left.add(page_index, top, _text(label_words), _text(value_words))
-            right.add(page_index, top, _text(right_label_words), _text(tail))
+            left_label, right_label = _text(label_words), _text(right_label_words)
+            # The two columns are one grid row, so a label fragment only
+            # starts a new row when every column taking a label on this line
+            # is starting one. On the line completing "Address of Authorized"
+            # / "Courier :", the left column is finishing a wrapped label too.
+            taking = [(column, text) for column, text in
+                      ((left, left_label), (right, right_label)) if text]
+            continuation = bool(taking) and all(
+                column.continues_label(text) for column, text in taking)
+            left.add(page_index, top, left_label, _text(value_words), continuation)
+            right.add(page_index, top, right_label, _text(tail), continuation)
     return entries
 
 

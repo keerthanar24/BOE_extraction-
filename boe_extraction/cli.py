@@ -9,9 +9,9 @@ from openpyxl import load_workbook
 from .excel_writer import (output_paths, safe_name, write_all_fields,
                            write_highlighted, write_invoice,
                            write_invoice_highlighted, write_mandatory,
-                           write_workbook)
+                           write_schema, write_workbook)
 from .extract import (document_fields, extract, extract_document,
-                      extract_with_highlights, verify_document)
+                      extract_with_highlights, schema_extract, verify_document)
 from .verify import report
 
 
@@ -25,6 +25,9 @@ def build_parser():
     parser.add_argument("--highlights", action="store_true",
                         help="extract what a reviewer highlighted on the PDF "
                              "into one workbook per document")
+    parser.add_argument("--schema", action="store_true",
+                        help="write exactly the fields the schema names, one "
+                             "workbook per document (the courier forms)")
     parser.add_argument("--workbook", metavar="FILE", type=Path,
                         help="write every document given to one workbook, "
                              "each on its own sheets rather than sharing them")
@@ -61,6 +64,9 @@ def main(argv=None):
                   f"{len(boe.all_items())} line item(s)")
             print(f"  {out}")
         return 0
+
+    if args.schema:
+        return _schema(args)
 
     if args.workbook:
         return _workbook(args)
@@ -131,6 +137,30 @@ def _verify(args):
             print(line)
         print("  => " + ("all checks passed" if passed else "CHECKS FAILED"))
         if not passed:
+            failures += 1
+    return 1 if failures else 0
+
+
+def _schema(args):
+    """Exactly the named fields, one workbook per document."""
+    failures = 0
+    for pdf_path in args.pdfs:
+        try:
+            boe, fields, items = schema_extract(pdf_path)
+        except Exception as error:  # a bad document must not stop the batch
+            print(f"{pdf_path}: {error}", file=sys.stderr)
+            failures += 1
+            continue
+
+        name = safe_name(boe.be_number or pdf_path.stem)
+        out_path = args.output_dir / f"BOE__{name}__extract.xlsx"
+        write_schema(boe, fields, items, out_path)
+        blank = sum(1 for _, _, value in fields if not value)
+        print(f"{pdf_path.name}: {boe.form_type}, BE {boe.be_number}")
+        print(f"  {out_path}  ({len(fields)} field(s), {blank} left blank on "
+              f"the form, {len(items)} line item(s))")
+        if not items:
+            print(f"{pdf_path}: no line items were extracted", file=sys.stderr)
             failures += 1
     return 1 if failures else 0
 
