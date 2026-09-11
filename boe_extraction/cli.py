@@ -13,6 +13,7 @@ from .excel_writer import (output_paths, safe_name, write_all_fields,
                            write_workbook)
 from .extract import (document_fields, extract, extract_document,
                       extract_with_highlights, schema_extract, verify_document)
+from .schema import FAMILIES, FAMILY
 from .verify import report
 
 
@@ -31,7 +32,7 @@ def build_parser():
                              "workbook per document")
     parser.add_argument("--combined", metavar="FILE", type=Path,
                         help="with --schema, write every document given to "
-                             "one workbook, each on its own sheets")
+                             "this one workbook instead of one per family")
     parser.add_argument("--workbook", metavar="FILE", type=Path,
                         help="write every document given to one workbook, "
                              "each on its own sheets rather than sharing them")
@@ -167,20 +168,28 @@ def _schema(args):
 
     if not extracts:
         return 1
-    if args.combined:
-        args.combined.parent.mkdir(parents=True, exist_ok=True)
-        write_schema_combined(extracts, args.combined)
-        print(f"  {args.combined}")
-        for name in load_workbook(args.combined).sheetnames:
-            print(f"    {name}")
-        return 1 if failures else 0
 
-    for boe, fields, items in extracts:
-        name = safe_name(boe.be_number or boe.source_file or "document")
-        out_path = args.output_dir / f"BOE__{name}__extract.xlsx"
-        write_schema(boe, fields, items, out_path)
-        print(f"  {out_path}")
+    # One workbook per family by default -- the cargo bills in one file, the
+    # courier bills in another -- and each document on its own sheets within.
+    groups = ([(args.combined, extracts)] if args.combined else
+              _by_family(args, extracts))
+    for out_path, group in groups:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        write_schema_combined(group, out_path)
+        print(f"  {out_path}  ({len(group)} document(s))")
+        for name in load_workbook(out_path).sheetnames:
+            print(f"    {name}")
     return 1 if failures else 0
+
+
+def _by_family(args, extracts):
+    """Each family of bill of entry, with the workbook it is written to."""
+    groups = []
+    for family in FAMILIES:
+        group = [e for e in extracts if FAMILY.get(e[0].form_type) == family]
+        if group:
+            groups.append((args.output_dir / f"{family}_BOE_extract.xlsx", group))
+    return groups
 
 
 def _workbook(args):

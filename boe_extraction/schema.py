@@ -173,7 +173,15 @@ ICEGATE_FIELDS = [
     ('PART - II - INVOICE & VALUATION DETAILS (Invoice 1 2 )', 'AD CODE'),
 ]
 
-DOCUMENT_FIELDS = {"ICEGATE BOE": ICEGATE_FIELDS,"CBE-XIV": CBE_XIV_FIELDS, "CBE-XIII": CBE_XIII_FIELDS}
+DOCUMENT_FIELDS = {"ICEGATE BOE": ICEGATE_FIELDS,
+                   "CBE-XIV": CBE_XIV_FIELDS,
+                   "CBE-XIII": CBE_XIII_FIELDS}
+
+# The two families the extract is delivered in: the ICEGATE cargo bill, and
+# the two ECCS courier bills, which are one family in everything but which
+# regulation they are filed under.
+FAMILIES = ("Cargo", "Courier")
+FAMILY = {"ICEGATE BOE": "Cargo", "CBE-XIV": "Courier", "CBE-XIII": "Courier"}
 
 # One row per line item. The columns the model exposes as attributes come
 # first; the rest are read from the item's own label/value cells.

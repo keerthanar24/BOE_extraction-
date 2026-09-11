@@ -13,9 +13,18 @@ allow-list, and that is what enforces the three rules this extract is held to:
 
 ## What is written
 
-    python -m boe_extraction.cli <pdf> [<pdf> ...] --schema --combined out.xlsx
+    python -m boe_extraction.cli <pdf> [<pdf> ...] --schema -o out
 
-writes every document given into **one workbook**, each on its own two sheets:
+writes **two workbooks**, whatever mix of documents it is given:
+
+| Workbook | Holds |
+|---|---|
+| `out/Cargo_BOE_extract.xlsx` | every ICEGATE cargo bill of the run |
+| `out/Courier_BOE_extract.xlsx` | every ECCS courier bill, CBE-XIV and CBE-XIII |
+
+A family with no documents in the run writes no workbook.
+
+Within each, one document per pair of sheets:
 
 | Sheet | Shape |
 |---|---|
@@ -24,8 +33,11 @@ writes every document given into **one workbook**, each on its own two sheets:
 
 Combined into one file, never into one sheet: a sheet holds a single bill of
 entry, and its name says which — `Cargo BOE`, `Courier CBE-XIV`,
-`Courier CBE-XIII`. Drop `--combined` to get one workbook per document
-instead, where the sheets are named `Document Fields` and `Line Items`.
+`Courier CBE-XIII`. Two bills of the same form are told apart by their BE
+number where it fits a sheet name, and numbered where it does not.
+
+`--combined FILE` overrides the split and puts every document in that one
+file instead.
 
 A field the form left blank still gets its row: the form asked, and an empty
 answer is an answer. Blank is written as blank, never as `0` — a duty head the

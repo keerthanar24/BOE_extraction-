@@ -600,3 +600,34 @@ def test_a_blank_item_column_is_blank_on_the_form():
     empty = {title for index, title in enumerate(ITEM_FIELDS)
              if all(row[index] in (None, "") for row in rows)}
     assert empty == absent          # CBE-XIII prints the rest per item
+
+
+def test_the_run_produces_one_workbook_per_family(tmp_path):
+    """The cargo bills in one file, the courier bills in another."""
+    from openpyxl import load_workbook
+
+    from boe_extraction.cli import main
+
+    assert main([str(STANDARD), str(COURIER), str(XIII), "--schema",
+                 "-o", str(tmp_path)]) == 0
+    assert sorted(p.name for p in tmp_path.glob("*.xlsx")) == [
+        "Cargo_BOE_extract.xlsx", "Courier_BOE_extract.xlsx"]
+
+    cargo = load_workbook(tmp_path / "Cargo_BOE_extract.xlsx")
+    assert cargo.sheetnames == ["Cargo BOE Fields", "Cargo BOE Line Items"]
+    assert cargo["Cargo BOE Fields"].max_row == 52          # 51 fields
+    assert cargo["Cargo BOE Line Items"].max_row == 10      # 9 items
+
+    courier = load_workbook(tmp_path / "Courier_BOE_extract.xlsx")
+    assert courier.sheetnames == [
+        "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
+        "Courier CBE-XIII Fields", "Courier CBE-XIII Line Items"]
+    assert courier["Courier CBE-XIV Line Items"].max_row == 5
+    assert courier["Courier CBE-XIII Line Items"].max_row == 45
+
+
+def test_a_family_with_no_documents_writes_no_workbook(tmp_path):
+    from boe_extraction.cli import main
+
+    assert main([str(COURIER), "--schema", "-o", str(tmp_path)]) == 0
+    assert [p.name for p in tmp_path.glob("*.xlsx")] == ["Courier_BOE_extract.xlsx"]
