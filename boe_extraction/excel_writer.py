@@ -485,15 +485,19 @@ def _unit_label(document, invoice, taken):
     form = FORM_LABELS.get(document.boe.form_type, document.boe.form_type)
     base = _sheet_safe(invoice.number if invoice is not None else form,
                        document.name)[:room].strip()
+    # The BE number tells two bills of the same form apart, but only where it
+    # fits whole: a truncated one names nothing.
+    label = base
     for candidate in (base, f"{base} {document.boe.be_number}"):
-        label = _sheet_safe(candidate, base)[:room].strip()
-        if label not in taken:
+        candidate = _sheet_safe(candidate, base).strip()
+        if len(candidate) <= room and candidate not in taken:
+            label = candidate
             break
     index = 1
     while label in taken:
         index += 1
         suffix = f" {index}"
-        label = label[:room - len(suffix)].strip() + suffix
+        label = base[:room - len(suffix)].strip() + suffix
     taken.add(label)
     return label
 
