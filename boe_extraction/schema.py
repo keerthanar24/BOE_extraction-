@@ -251,6 +251,14 @@ def document_rows(form_type, cells):
             for section, label in wanted]
 
 
+# The two courier forms word some item labels differently. A column is one
+# field, so the other form's wording is read into the same column rather than
+# added as a column of its own.
+ITEM_LABEL_ALIASES = {
+    "Currency of Unit Price": ("Currency for Unit Price",),
+}
+
+
 def item_rows(boe, columns_by_title):
     """One row per line item, in the schema's column order.
 
@@ -267,6 +275,15 @@ def item_rows(boe, columns_by_title):
                 elif title in columns_by_title:
                     row.append(getattr(item, columns_by_title[title]))
                 else:
-                    row.append(item.details.get(title) or None)
+                    row.append(_detail(item, title))
             rows.append(row)
     return rows
+
+
+def _detail(item, title):
+    """A column's value from the item's own cells, under either form's wording."""
+    for label in (title,) + ITEM_LABEL_ALIASES.get(title, ()):
+        value = item.details.get(label)
+        if value:
+            return value
+    return None

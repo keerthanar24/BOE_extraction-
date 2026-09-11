@@ -93,6 +93,38 @@ Two fields were being cut short, and both are fixed:
   centred heading that follows it, `DETAILS OF CRN (if present)`. The heading
   test rejected it for the lower-case words in its brackets.
 
+## Why a line item column can be blank
+
+The column list is one list across all three forms, and the forms do not print
+the same things per item. A blank column is never a field that was looked for
+and missed -- each one is accounted for:
+
+| Column | CBE-XIV | CBE-XIII | Cargo BOE |
+|---|---|---|---|
+| `ADD`, `CHCESS`, `CESS` rate and amount | not on the form | not on the form | `ADD Amount` filled |
+| `License Type`, `License Number` | not filled | printed, left blank | not on the form |
+| `Address of Manufacturer` | not on the form | printed, left blank | not on the form |
+| `Discount Amount`, `Currency of Discount` | printed, left blank | not filled | not on the form |
+| `Number of Packages`, `Marks on Packages` | **document level** | per item | not per item |
+| `Invoice Value`, `Invoice Term` | **document level** | per item | document level |
+| `Landing Charges`, `Insurance`, `Freight` | charges table, left blank | per item | not per item |
+
+Where a form prints something once per invoice rather than once per item, it
+is extracted -- on that document's Fields sheet -- and is not repeated down
+every item row, because that would be the same value under two headings.
+CBE-XIV's `Number of Packages` is `1`, its `Invoice Value` `1080`, its
+`Terms of Invoice` `CIF`; all three are on `Courier CBE-XIV Fields`.
+
+A test asserts this list: if a column goes blank for a reason not named above,
+it fails.
+
+## One field, either form's wording
+
+The two courier forms word an item label differently, so a column is read
+under either: CBE-XIV prints `Currency for Unit Price` where CBE-XIII prints
+`Currency of Unit Price`. The alias fills the one column rather than adding a
+second. `ITEM_LABEL_ALIASES` in `schema.py` holds these.
+
 ## Checks the extract is held to
 
 Run `python -m pytest tests -q`.

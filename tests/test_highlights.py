@@ -547,3 +547,56 @@ def test_duty_amounts_add_up_on_every_item():
                         for head in ("BCD", "SWS", "IGST", "AIDC", "ADD",
                                      "CHCESS", "CESS", "CMPNSTRY"))
             assert abs(heads - (row[at["Duty Amount"]] or 0)) <= 1.0
+
+
+def test_a_column_is_read_under_either_form_s_wording():
+    """CBE-XIV says "Currency for Unit Price", CBE-XIII "Currency of ...".
+
+    One field, so one column: the other form's wording is an alias, not a
+    column of its own.
+    """
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import ITEM_FIELDS
+
+    at = ITEM_FIELDS.index("Currency of Unit Price")
+    for pdf in (COURIER, XIII):
+        _, _, rows = schema_extract(pdf)
+        assert {row[at] for row in rows} == {"USD"}
+
+
+def test_a_blank_item_column_is_blank_on_the_form():
+    """Every column left empty must be one the form does not fill per item.
+
+    The counterpart is either absent from that form, blank on it, or printed
+    once at document level -- where it is extracted on the Fields sheet, and
+    must not be repeated onto every item row.
+    """
+    from boe_extraction.extract import schema_extract
+    from boe_extraction.schema import ITEM_FIELDS
+
+    # Neither courier form carries these duty heads, nor a manufacturer's
+    # address; both leave the licence pair blank.
+    absent = {"ADD Rate", "ADD Amount", "CHCESS rate", "CHCESS Amount",
+              "CESS rate", "CESS Amount", "License Type", "License Number",
+              "Address of Manufacturer", "Discount Amount",
+              "Currency of Discount"}
+    # CBE-XIV prints these once per invoice rather than once per item.
+    at_document_level = {"Number of Packages", "Marks on Packages",
+                         "Invoice Value", "Invoice Term", "Landing Charges",
+                         "Insurance", "Freight"}
+
+    _, fields, rows = schema_extract(COURIER)
+    empty = {title for index, title in enumerate(ITEM_FIELDS)
+             if all(row[index] in (None, "") for row in rows)}
+    assert empty == absent | at_document_level
+
+    # ... and those really are on the CBE-XIV's own Fields sheet.
+    values = {label: value for _, label, value in fields}
+    assert values["Number of Packages"] == "1"
+    assert values["Invoice Value"] == "1080"
+    assert values["Terms of Invoice"] == "CIF"
+
+    _, _, rows = schema_extract(XIII)
+    empty = {title for index, title in enumerate(ITEM_FIELDS)
+             if all(row[index] in (None, "") for row in rows)}
+    assert empty == absent          # CBE-XIII prints the rest per item
