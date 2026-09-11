@@ -24,6 +24,15 @@ VALUE_LINE_GAP = 14
 ADDRESS_BLOCK = re.compile(r"NAME & ADDRESS$")
 # A wrapped continuation follows within this many points of the line above it.
 CONTINUATION_GAP = 4
+# The narrowest gap that separates one address block from the next across the
+# page. Words inside a block sit a few points apart; the blocks themselves are
+# a whole column apart.
+BLOCK_GAP = 20
+# How far right of a block's left edge a label may start and still count as
+# beginning the form's next row: "AD CODE" is set a couple of points in from
+# the address above it, while a label belonging to the column beside the block
+# sits a whole column away.
+BLOCK_ROW_MARGIN = 12
 # The narrowest gap that separates a heading from a value beside it. The form
 # sets both in the same run, so the break is only a couple of points wider than
 # the spacing between words.
@@ -213,6 +222,55 @@ class Pair:
         return f"Pair(p{self.page + 1} {self.label!r}={self.value!r})"
 
 
+def _block_edges(body):
+    """Where each address block on these lines starts, left to right.
+
+    A block starts wherever a line's words resume after a gap wider than the
+    spacing inside one. Taking the leftmost start of each run across the whole
+    block gives the column edges, which is what a block must be cut on: the
+    headings sit indented over their blocks, so cutting on a heading takes the
+    first words of the block beside it.
+    """
+    starts = set()
+    for words in body:
+        ordered = sorted(words, key=lambda w: w["x0"])
+        starts.add(ordered[0]["x0"])
+        for previous, word in zip(ordered, ordered[1:]):
+            if word["x0"] - previous["x1"] >= BLOCK_GAP:
+                starts.add(word["x0"])
+    edges = sorted(starts)
+    # Two lines of one block rarely start at the same x to the point, so fold
+    # starts that sit within a word's width of each other.
+    folded = []
+    for edge in edges:
+        if not folded or edge - folded[-1] >= BLOCK_GAP:
+            folded.append(edge)
+    return folded
+
+
+def _block_columns(address, body):
+    """Which stretch of the page each address heading's block occupies.
+
+    Headings are claimed left to right, each taking the rightmost edge that
+    still starts at or before it and has not been claimed. A heading with no
+    edge left to claim heads an empty block -- the form prints the heading
+    whether or not the filer answered it.
+    """
+    edges = _block_edges(body)
+    claimed, bounds = set(), {}
+    for column in sorted(address, key=lambda c: c.x0):
+        available = [e for e in edges
+                     if e <= column.x0 + MIN_INLINE_GAP and e not in claimed]
+        if not available:
+            continue
+        left = available[-1]
+        claimed.add(left)
+        beyond = [e for e in edges if e > left]
+        bounds[id(column)] = ((left - 2, beyond[0] - 2 if beyond else float("inf")),
+                              body)
+    return bounds
+
+
 def read_tables(pdf):
     """Every label/value pair in the form's tables, in reading order."""
     pairs = []
@@ -236,31 +294,40 @@ def read_tables(pdf):
             bottom = max([w["bottom"] for w in below] or
                          [w["bottom"] for w in line])
 
-            def block(column, start):
-                """A name and address printed as a block under its heading.
+            def block_lines():
+                """The lines of the address blocks printed under this heading.
 
-                The heading sits indented over a block that starts further
-                left, so the block runs from where the previous column ended.
-                Each line is cut short at the next label on it, since a
-                neighbouring column's value can share the line.
+                A neighbouring column's label can sit on a block's line -- the
+                customs broker's name is printed beside the importer's address
+                -- so a label alone does not end the block. What does end it is
+                a label starting at the block's own left edge, because that is
+                the form beginning its next row.
                 """
-                collected = []
+                found, left = [], None
                 for below in lines[index + 1:]:
-                    # A wholly bold line is the next heading row. A line that
-                    # merely carries a label alongside the address is cut, not
-                    # stopped at.
-                    if all(is_bold(w) for w in below):
-                        break
-                    labels = [w["x0"] for w in below
-                              if is_bold(w) and w["x0"] > start]
-                    limit = min([column.until] + labels)
-                    held = [w["text"] for w in below if not is_bold(w)
-                            and start <= (w["x0"] + w["x1"]) / 2 < limit]
-                    if not held:
-                        if collected:
+                    words = [w for w in below if not is_bold(w)]
+                    if not words:
+                        if found:
                             break
                         continue
-                    collected.append(" ".join(held))
+                    labels = [w["x0"] for w in below if is_bold(w)]
+                    edge = min(w["x0"] for w in words)
+                    if left is None:
+                        left = edge
+                    elif labels and min(labels) <= left + BLOCK_ROW_MARGIN:
+                        break
+                    found.append(words)
+                return found
+
+            def block(edges, body):
+                """One address block, read between the edges its column owns."""
+                left, right = edges
+                collected = []
+                for words in body:
+                    held = [w["text"] for w in words
+                            if left <= (w["x0"] + w["x1"]) / 2 < right]
+                    if held:
+                        collected.append(" ".join(held))
                 return ", ".join(c for c in collected if c)
 
             def under(column):
@@ -268,16 +335,20 @@ def read_tables(pdf):
                 return _join_rows([_text([w for w in row if column.holds(w)])
                                    for row in rows])
 
+            # A heading's own words are its label only where values are
+            # printed below it; beside them, the label stops at the value. So
+            # the label is settled first, and the address blocks picked from it.
+            read = {id(c): ((_text(c.words), "") if below else c.split())
+                    for c in columns}
+            address = [c for c in columns
+                       if ADDRESS_BLOCK.search(read[id(c)][0])]
+            blocks = _block_columns(address, block_lines()) if address else {}
+
             for column in columns:
-                # Only read a value from beside the heading when there is no
-                # value line under it; otherwise the heading's own trailing
-                # words would be mistaken for the value.
-                label, inline = (_text(column.words), "") if below else column.split()
+                label, inline = read[id(column)]
                 value = inline or under(column)
-                if ADDRESS_BLOCK.search(label):
-                    position = columns.index(column)
-                    start = columns[position - 1].until if position else 0
-                    value = block(column, start) or value
+                if id(column) in blocks:
+                    value = block(*blocks[id(column)]) or value
                 pairs.append(Pair(page_index, label, value,
                                   top, bottom, column.x0, column.until))
 

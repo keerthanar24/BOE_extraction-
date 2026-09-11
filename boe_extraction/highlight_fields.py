@@ -19,6 +19,10 @@ from .icegate_tables import read_tables
 from .pdf_text import is_bold, upright_page, word_lines
 
 PART_HEADING = re.compile(r"^PART - [IVX]+ - .+")
+# Part II names the invoices it covers -- "(Invoice 1 2 )" on a bill with two,
+# "(Invoice 1 1 )" on a bill with one. The section is the same section either
+# way, so the count is not part of its name.
+PART_QUALIFIER = re.compile(r"\s*\(Invoice[\s\d]*\)\s*$")
 BANNER = re.compile(r"^(BILL OF ENTRY FOR [A-Z ]+?)(?: PKG| G\.WT|$)")
 # What opens an item on a courier form: CBE-XIV numbers them, CBE-XIII does not.
 ITEM_BLOCK = re.compile(r"^(?:Details\s+Of\s+Item\s*-\s*\d+|ITEM\s*:)$", re.IGNORECASE)
@@ -201,7 +205,8 @@ def _part_headings(pdf):
         for line in word_lines(upright_page(page)):
             text = " ".join(w["text"] for w in line)
             if PART_HEADING.match(text):
-                headings.setdefault(page_index, []).append((line[0]["top"], text))
+                headings.setdefault(page_index, []).append(
+                    (line[0]["top"], PART_QUALIFIER.sub("", text)))
             elif not banner and BANNER.match(text):
                 banner = BANNER.match(text).group(1).strip()
     headings["banner"] = banner

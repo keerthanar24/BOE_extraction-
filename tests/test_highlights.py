@@ -631,3 +631,62 @@ def test_a_family_with_no_documents_writes_no_workbook(tmp_path):
 
     assert main([str(COURIER), "--schema", "-o", str(tmp_path)]) == 0
     assert [p.name for p in tmp_path.glob("*.xlsx")] == ["Courier_BOE_extract.xlsx"]
+
+
+SECOND_CARGO = SAMPLES / "BOE_3036066_icegate.pdf"
+
+
+def test_a_second_cargo_bill_reads_its_own_figures():
+    """A bill the schema was not written against still reconciles."""
+    from boe_extraction.extract import schema_extract, verify_document
+    from boe_extraction.verify import report
+
+    boe, fields, items = schema_extract(SECOND_CARGO)
+    assert (boe.form_type, boe.be_number) == ("ICEGATE BOE", "3036066")
+    assert len(fields) == 51 and len(items) == 12
+
+    _, checks = verify_document(SECOND_CARGO)
+    _, passed = report(checks, boe.form_type)
+    assert passed
+
+
+def test_part_two_is_the_same_section_however_many_invoices():
+    """Part II names the invoices it covers, and that is not its name.
+
+    The heading reads "(Invoice 1 2 )" on a bill with two invoices and
+    "(Invoice 1 1 )" on a bill with one, which put the section out of reach of
+    a schema written against the other.
+    """
+    from boe_extraction.extract import schema_extract
+
+    for pdf in (STANDARD, SECOND_CARGO):
+        _, fields, _ = schema_extract(pdf)
+        sections = {section for section, _, _ in fields}
+        assert "PART - II - INVOICE & VALUATION DETAILS" in sections
+        assert not [s for s in sections if "(Invoice" in s]
+
+
+def test_two_address_blocks_side_by_side_stay_apart():
+    """The headings are indented over blocks that start further left.
+
+    Cutting the blocks where the headings sit gave the left block the first
+    words of the right one, and left the right block missing them.
+    """
+    from boe_extraction.extract import schema_extract
+
+    _, fields, _ = schema_extract(SECOND_CARGO)
+    values = {label: value for _, label, value in fields}
+    assert values["1.BUYER'S NAME & ADDRESS"] == (
+        "VALUECART PRIVATE LIMITED, NO 2ND FLOOR , 1/1 VINAYAKA TOWERS, "
+        "1ST CROSS , GANDHINAGAR, Bangalore, BANGALORE, 560009")
+    assert values["2.SELLER'S NAME & ADDRESS"] == (
+        "CREATIVE TOOLS HK COMPANY LIMITED, UNIT 03 3/F SEAPOWERCENTRE "
+        "NO.73-77, LEI MUK ROAD KWAI CHUNG NT, HK")
+    assert values["3.SUPPLIER NAME & ADDRESS"].startswith(
+        "VALOCITYCRAFT (THAILAND) CO.,LTD, NO. 369/37 MOO6")
+    assert values["4.THIRD PARTY NAME & ADDRESS"].endswith("Hong Kong")
+
+    # The block on page 1 shares its lines with the broker's name and the AD
+    # code, and must take neither.
+    assert values["1.IMPORTER NAME & ADDRESS"].endswith("BANGALORE, 560009")
+    assert values["2.CB NAME"] == "CLASSIC CLEARING & FORWARDING PVT.LTD."
