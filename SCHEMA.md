@@ -26,16 +26,26 @@ A family with no documents in the run writes no workbook.
 
 Within each, one document per pair of sheets:
 
+**The cargo workbook is three sheets, however many bills the run holds:**
+
+| Sheet | Shape |
+|---|---|
+| `Cargo BOE Fields` | Section, Field, then a column of values per bill headed by its BE number |
+| `Cargo BOE Invoices` | one row per invoice, BE No first |
+| `Cargo BOE Line Items` | BE No, then the 44 item columns — one row per item |
+
+Every cargo bill answers the same 55 fields, so the fields are the rows and
+the bills are the columns; the two tables name their bill on every row. A run
+of two bills gives 55 field rows, 3 invoice rows and 21 item rows — never a
+fourth sheet.
+
+**The courier workbook keeps a pair of sheets per document**, because the two
+courier forms do not share a field list:
+
 | Sheet | Shape |
 |---|---|
 | `<form> Fields` | Section, Field, Value — one row per schema field |
-| `<form> Invoices` | *cargo only* — one row per invoice, BE No first |
 | `<form> Line Items` | 44 columns — one row per line item |
-
-The cargo bill routinely carries several invoices under one bill of entry and
-Part II repeats for each, so those figures get a sheet: BE No, Invoice Number,
-Invoice Date, Supplier, Invoice Value, Currency, Exchange Rate, Line Items,
-Assessable Value, Total Duty. The courier forms keep their two sheets.
 
 Combined into one file, never into one sheet: a sheet holds a single bill of
 entry, and its name says which — `Cargo BOE`, `Courier CBE-XIV`,

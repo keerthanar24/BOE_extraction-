@@ -213,15 +213,25 @@ def _write_invoices(sheet, boe, invoice=None):
     the shape they are in: the document's own fields have one column of
     values, so a bill with several invoices can only stack them in a cell.
     """
-    sheet.append(["BE No", "Invoice Number", "Invoice Date", "Supplier",
-                  "Invoice Value", "Currency", "Exchange Rate", "Line Items",
-                  "Assessable Value", "Total Duty"])
+    _append_invoices(sheet, boe, invoice=invoice)
+    _style_invoices(sheet)
+
+
+def _append_invoices(sheet, boe, invoice=None, header=True):
+    """One bill's invoice rows, under the header when it is the first."""
+    if header:
+        sheet.append(["BE No", "Invoice Number", "Invoice Date", "Supplier",
+                      "Invoice Value", "Currency", "Exchange Rate",
+                      "Line Items", "Assessable Value", "Total Duty"])
     for one in ([invoice] if invoice is not None else boe.invoices):
         sheet.append([boe.be_number, one.number, one.date,
                       one.supplier, one.invoice_value, one.currency,
                       one.exchange_rate, len(one.items),
                       _totals(one.items, "assessable_value"),
                       _totals(one.items, "duty_amount")])
+
+
+def _style_invoices(sheet):
     for cell in sheet[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -595,16 +605,82 @@ def write_schema(boe, fields, items, path):
     return path
 
 
-def write_schema_combined(extracts, path):
-    """Every document of a run in one workbook, each on its own sheets.
+def _write_cargo_fields(sheet, extracts):
+    """Every cargo bill's fields side by side: a column of values per bill.
 
-    Combined into one file, never into one sheet: a sheet holds a single bill
-    of entry, and its name says which.
+    The schema is the same list for every cargo bill, so the fields are the
+    rows and the bills are the columns -- the shape a reader compares two
+    bills in, and the only one that keeps a run to three sheets.
+    """
+    from .schema import ICEGATE_FIELDS
+
+    sheet.append(["Section", "Field"] + [boe.be_number for boe, _, _ in extracts])
+    answers = [{(section, label): value for section, label, value in fields}
+               for _, fields, _ in extracts]
+    for section, label in ICEGATE_FIELDS:
+        sheet.append([section, label]
+                     + [a.get((section, label), "") for a in answers])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for row in range(2, sheet.max_row + 1):
+        for index in range(3, sheet.max_column + 1):
+            sheet.cell(row=row, column=index).alignment = Alignment(
+                vertical="top", wrap_text=True)
+    for column, width in zip("AB", (34, 40)):
+        sheet.column_dimensions[column].width = width
+    for index in range(3, sheet.max_column + 1):
+        sheet.column_dimensions[get_column_letter(index)].width = 70
+    sheet.freeze_panes = "C2"
+
+
+def _write_cargo_items(sheet, extracts):
+    """Every cargo bill's line items in one table, each row naming its bill."""
+    from .schema import ITEM_FIELDS
+
+    sheet.append(["BE No"] + list(ITEM_FIELDS))
+    for boe, _, items in extracts:
+        for row in items:
+            sheet.append([boe.be_number] + row)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sheet.column_dimensions["A"].width = 14
+    for index, title in enumerate(ITEM_FIELDS, start=2):
+        letter = get_column_letter(index)
+        sheet.column_dimensions[letter].width = COLUMN_WIDTHS.get(title, DEFAULT_WIDTH)
+        if title in MONEY_COLUMNS:
+            for row in range(2, sheet.max_row + 1):
+                sheet.cell(row=row, column=index).number_format = MONEY
+    sheet.freeze_panes = "D2"
+    sheet.row_dimensions[1].height = 46
+
+
+def _write_cargo(workbook, extracts):
+    """The cargo bills of a run: three sheets, however many bills there are."""
+    _write_cargo_fields(workbook.create_sheet("Cargo BOE Fields"), extracts)
+    invoices = workbook.create_sheet("Cargo BOE Invoices")
+    for index, (boe, _, _) in enumerate(extracts):
+        _append_invoices(invoices, boe, header=index == 0)
+    _style_invoices(invoices)
+    _write_cargo_items(workbook.create_sheet("Cargo BOE Line Items"), extracts)
+
+
+def write_schema_combined(extracts, path):
+    """Every document of a run in one workbook.
+
+    The cargo bills share three sheets, because every cargo bill answers the
+    same schema and a bill is named on every row. The courier forms differ
+    from one another, so each keeps its own sheets.
     """
     workbook = Workbook()
     workbook.remove(workbook.active)
+    cargo = [e for e in extracts if e[0].form_type in HAS_INVOICE_SHEET]
+    if cargo:
+        _write_cargo(workbook, cargo)
     taken = set()
     for boe, fields, items in extracts:
+        if boe.form_type in HAS_INVOICE_SHEET:
+            continue
         label = _unit_label(_Named(boe), None, taken)
         # "Fields", not "Document Fields": with the form name in front, the
         # longer word costs more than Excel's 31 characters allow.

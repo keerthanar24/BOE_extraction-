@@ -517,6 +517,7 @@ def test_one_workbook_holds_every_document_on_its_own_sheets(tmp_path):
         "Cargo BOE Fields", "Cargo BOE Invoices", "Cargo BOE Line Items",
         "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
         "Courier CBE-XIII Fields", "Courier CBE-XIII Line Items"]
+    assert workbook["Cargo BOE Fields"]["C1"].value == "3141398"
     for name in workbook.sheetnames:
         assert len(name) <= 31
         # No sheet names a document, because no sheet holds more than one.
@@ -878,3 +879,43 @@ def test_the_cargo_address_blocks_are_filled_or_blank_as_the_form_has_them():
                   "3.SUPPLIER NAME & ADDRESS", "4.THIRD PARTY NAME & ADDRESS"):
         assert values[label], label          # this bill fills all four
     assert values["2.SELLER'S NAME & ADDRESS"] != values["3.SUPPLIER NAME & ADDRESS"]
+
+
+def test_a_run_of_cargo_bills_keeps_to_three_sheets(tmp_path):
+    """However many cargo bills, the workbook is Fields, Invoices, Line Items.
+
+    Every cargo bill answers the same schema, so the fields are the rows and
+    the bills are the columns; the two tables name their bill on every row.
+    """
+    from openpyxl import load_workbook
+
+    from boe_extraction.cli import main
+    from boe_extraction.schema import ICEGATE_FIELDS, ITEM_FIELDS
+
+    assert main([str(STANDARD), str(SECOND_CARGO), "--schema",
+                 "-o", str(tmp_path)]) == 0
+    workbook = load_workbook(tmp_path / "Cargo_BOE_extract.xlsx")
+    assert workbook.sheetnames == ["Cargo BOE Fields", "Cargo BOE Invoices",
+                                   "Cargo BOE Line Items"]
+
+    fields = workbook["Cargo BOE Fields"]
+    assert [c.value for c in fields[1]] == ["Section", "Field",
+                                            "3141398", "3036066"]
+    assert fields.max_row == len(ICEGATE_FIELDS) + 1
+    answers = {row[1]: row[2:] for row in fields.iter_rows(min_row=2, values_only=True)}
+    assert answers["BE No"] == ("3141398", "3036066")
+    assert answers["Port Code"] == ("INNSA1", "INMAA1")
+    # A bill that names no seller reports blank beside one that does.
+    assert answers["2.SELLER'S NAME & ADDRESS"][0] is None
+    assert answers["2.SELLER'S NAME & ADDRESS"][1].startswith("CREATIVE TOOLS")
+
+    invoices = workbook["Cargo BOE Invoices"]
+    assert [r[:2] for r in invoices.iter_rows(min_row=2, values_only=True)] == [
+        ("3141398", "FBA15M13GSD3"), ("3141398", "FBA15M16XHDH"),
+        ("3036066", "XSDD2836596")]
+
+    items = workbook["Cargo BOE Line Items"]
+    assert [c.value for c in items[1]] == ["BE No"] + list(ITEM_FIELDS)
+    assert items.max_row == 9 + 12 + 1
+    bills = [row[0] for row in items.iter_rows(min_row=2, values_only=True)]
+    assert bills.count("3141398") == 9 and bills.count("3036066") == 12
