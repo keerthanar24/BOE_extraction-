@@ -29,7 +29,13 @@ Within each, one document per pair of sheets:
 | Sheet | Shape |
 |---|---|
 | `<form> Fields` | Section, Field, Value — one row per schema field |
+| `<form> Invoices` | *cargo only* — one row per invoice, BE No first |
 | `<form> Line Items` | 44 columns — one row per line item |
+
+The cargo bill routinely carries several invoices under one bill of entry and
+Part II repeats for each, so those figures get a sheet: BE No, Invoice Number,
+Invoice Date, Supplier, Invoice Value, Currency, Exchange Rate, Line Items,
+Assessable Value, Total Duty. The courier forms keep their two sheets.
 
 Combined into one file, never into one sheet: a sheet holds a single bill of
 entry, and its name says which — `Cargo BOE`, `Courier CBE-XIV`,

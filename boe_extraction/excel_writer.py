@@ -206,17 +206,18 @@ def _totals(items, field):
     return round(sum(getattr(i, field) or 0 for i in items), 2)
 
 
-def _write_document_invoices(sheet, document, invoice=None):
-    """The invoices of one document, with what each one totals.
+def _write_invoices(sheet, boe, invoice=None):
+    """The invoices of one bill of entry, with what each one totals.
 
-    Part II's per-invoice figures are reported here rather than among the
-    document's fields, where only the first invoice's could ever show.
+    Part II's per-invoice figures are reported here a row at a time, which is
+    the shape they are in: the document's own fields have one column of
+    values, so a bill with several invoices can only stack them in a cell.
     """
     sheet.append(["BE No", "Invoice Number", "Invoice Date", "Supplier",
                   "Invoice Value", "Currency", "Exchange Rate", "Line Items",
                   "Assessable Value", "Total Duty"])
-    for one in ([invoice] if invoice is not None else document.boe.invoices):
-        sheet.append([document.boe.be_number, one.number, one.date,
+    for one in ([invoice] if invoice is not None else boe.invoices):
+        sheet.append([boe.be_number, one.number, one.date,
                       one.supplier, one.invoice_value, one.currency,
                       one.exchange_rate, len(one.items),
                       _totals(one.items, "assessable_value"),
@@ -521,8 +522,8 @@ def write_workbook(documents, path, per_invoice=False):
     workbook = Workbook()
     workbook.remove(workbook.active)
     for document, invoice, label in _units(documents, per_invoice):
-        _write_document_invoices(workbook.create_sheet(f"{label} Invoices"),
-                                 document, invoice)
+        _write_invoices(workbook.create_sheet(f"{label} Invoices"),
+                        document.boe, invoice)
         _write_highlighted(workbook.create_sheet(f"{label} Fields"),
                            document.fields)
         items = workbook.create_sheet(f"{label} Line Items")
@@ -571,8 +572,14 @@ def _write_schema_items(lines, items):
     lines.row_dimensions[1].height = 46
 
 
+# The cargo bill routinely carries several invoices under one bill of entry,
+# and Part II repeats for each. Those figures are a table, so it gets a sheet
+# for them. The courier forms keep their two sheets.
+HAS_INVOICE_SHEET = ("ICEGATE BOE",)
+
+
 def write_schema(boe, fields, items, path):
-    """One document's schema fields and line items: two sheets, nothing else.
+    """One document's schema fields and line items, and nothing else.
 
     Every field the schema names gets a row or a column, whether or not this
     document filled it, and nothing the schema does not name is written.
@@ -581,6 +588,8 @@ def write_schema(boe, fields, items, path):
     sheet = workbook.active
     sheet.title = "Document Fields"
     _write_schema_fields(sheet, fields)
+    if boe.form_type in HAS_INVOICE_SHEET:
+        _write_invoices(workbook.create_sheet("Invoices"), boe)
     _write_schema_items(workbook.create_sheet("Line Items"), items)
     workbook.save(path)
     return path
@@ -600,6 +609,8 @@ def write_schema_combined(extracts, path):
         # "Fields", not "Document Fields": with the form name in front, the
         # longer word costs more than Excel's 31 characters allow.
         _write_schema_fields(workbook.create_sheet(f"{label} Fields"), fields)
+        if boe.form_type in HAS_INVOICE_SHEET:
+            _write_invoices(workbook.create_sheet(f"{label} Invoices"), boe)
         _write_schema_items(workbook.create_sheet(f"{label} Line Items"), items)
     workbook.save(path)
     return path

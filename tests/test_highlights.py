@@ -456,7 +456,10 @@ def test_the_extract_carries_the_schema_and_nothing_else(tmp_path, pdf, form,
 
     path = write_schema(boe, document, rows, tmp_path / "extract.xlsx")
     workbook = load_workbook(path)
-    assert workbook.sheetnames == ["Document Fields", "Line Items"]
+    # Only the cargo bill gets an Invoices sheet; Part II repeats per invoice.
+    assert workbook.sheetnames == (
+        ["Document Fields", "Invoices", "Line Items"] if form == "ICEGATE BOE"
+        else ["Document Fields", "Line Items"])
     assert workbook["Document Fields"].max_row == fields + 1
     assert [c.value for c in workbook["Line Items"][1]] == list(ITEM_FIELDS)
     assert workbook["Line Items"].max_row == items + 1
@@ -511,13 +514,14 @@ def test_one_workbook_holds_every_document_on_its_own_sheets(tmp_path):
     path = write_schema_combined(extracts, tmp_path / "all.xlsx")
     workbook = load_workbook(path)
     assert workbook.sheetnames == [
-        "Cargo BOE Fields", "Cargo BOE Line Items",
+        "Cargo BOE Fields", "Cargo BOE Invoices", "Cargo BOE Line Items",
         "Courier CBE-XIV Fields", "Courier CBE-XIV Line Items",
         "Courier CBE-XIII Fields", "Courier CBE-XIII Line Items"]
     for name in workbook.sheetnames:
         assert len(name) <= 31
         # No sheet names a document, because no sheet holds more than one.
-        assert workbook[name]["A1"].value in ("Section", ITEM_FIELDS[0])
+        assert workbook[name]["A1"].value in (
+            "Section", "BE No", ITEM_FIELDS[0])
     for name, rows in (("Cargo BOE Fields", 55), ("Cargo BOE Line Items", 9),
                        ("Courier CBE-XIV Fields", 55),
                        ("Courier CBE-XIII Line Items", 44)):
@@ -624,7 +628,9 @@ def test_the_run_produces_one_workbook_per_family(tmp_path):
         "Cargo_BOE_extract.xlsx", "Courier_BOE_extract.xlsx"]
 
     cargo = load_workbook(tmp_path / "Cargo_BOE_extract.xlsx")
-    assert cargo.sheetnames == ["Cargo BOE Fields", "Cargo BOE Line Items"]
+    assert cargo.sheetnames == ["Cargo BOE Fields", "Cargo BOE Invoices",
+                                "Cargo BOE Line Items"]
+    assert cargo["Cargo BOE Invoices"].max_row == 3          # two invoices
     assert cargo["Cargo BOE Fields"].max_row == 56          # 55 fields
     assert cargo["Cargo BOE Line Items"].max_row == 10      # 9 items
 
@@ -808,3 +814,67 @@ def test_a_value_beside_its_label_stops_at_the_column_above_it():
     assert column.split(_next_column(_numbered_columns(above), column)) == (
         "15.Term", "CIF")
     assert column.split() == ("15.Term", "CIF No")   # unbounded, as before
+
+
+def test_the_cargo_extract_carries_an_invoices_sheet(tmp_path):
+    """Part II repeats per invoice, so its figures get a sheet of their own.
+
+    Only the cargo bill: the courier forms carry one invoice's details among
+    their fields and keep their two sheets.
+    """
+    from openpyxl import load_workbook
+
+    from boe_extraction.excel_writer import write_schema
+    from boe_extraction.extract import schema_extract
+
+    boe, fields, items = schema_extract(STANDARD)
+    path = write_schema(boe, fields, items, tmp_path / "cargo.xlsx")
+    workbook = load_workbook(path)
+    assert workbook.sheetnames == ["Document Fields", "Invoices", "Line Items"]
+
+    sheet = workbook["Invoices"]
+    assert [c.value for c in sheet[1]][:5] == [
+        "BE No", "Invoice Number", "Invoice Date", "Supplier", "Invoice Value"]
+    rows = [r[:5] for r in sheet.iter_rows(min_row=2, values_only=True)]
+    assert rows == [("3141398", "FBA15M13GSD3", "13-JUL-26",
+                     "GATI HONG KONG LIMITED", 3050.3),
+                    ("3141398", "FBA15M16XHDH", "17-JUL-26",
+                     "GATI HONG KONG LIMITED", 2780.08)]
+
+    boe, fields, items = schema_extract(COURIER)
+    path = write_schema(boe, fields, items, tmp_path / "courier.xlsx")
+    assert load_workbook(path).sheetnames == ["Document Fields", "Line Items"]
+
+
+def test_a_supplier_is_named_from_its_own_block():
+    """The supplier and the third party sit side by side under their headings.
+
+    Reading the line under the heading joined the two into one company.
+    """
+    from boe_extraction.extract import extract
+
+    assert [i.supplier for i in extract(STANDARD).invoices] == [
+        "GATI HONG KONG LIMITED", "GATI HONG KONG LIMITED"]
+    # This bill names a third party as well, and it is not the supplier.
+    boe = extract(SECOND_CARGO)
+    assert [i.supplier for i in boe.invoices] == ["VALOCITYCRAFT (THAILAND) CO.,LTD"]
+
+
+def test_the_cargo_address_blocks_are_filled_or_blank_as_the_form_has_them():
+    """Each of the four blocks: the address where there is one, blank where not."""
+    from boe_extraction.extract import schema_extract
+
+    _, fields, _ = schema_extract(STANDARD)
+    values = {label: value for _, label, value in fields}
+    assert values["1.BUYER'S NAME & ADDRESS"].startswith("VALUECART PRIVATE LIMITED,")
+    assert values["3.SUPPLIER NAME & ADDRESS"].startswith("GATI HONG KONG LIMITED,")
+    # This bill names neither, and the form prints both headings empty.
+    assert values["2.SELLER'S NAME & ADDRESS"] == ""
+    assert values["4.THIRD PARTY NAME & ADDRESS"] == ""
+
+    _, fields, _ = schema_extract(SECOND_CARGO)
+    values = {label: value for _, label, value in fields}
+    for label in ("1.BUYER'S NAME & ADDRESS", "2.SELLER'S NAME & ADDRESS",
+                  "3.SUPPLIER NAME & ADDRESS", "4.THIRD PARTY NAME & ADDRESS"):
+        assert values[label], label          # this bill fills all four
+    assert values["2.SELLER'S NAME & ADDRESS"] != values["3.SUPPLIER NAME & ADDRESS"]

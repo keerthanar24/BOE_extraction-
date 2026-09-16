@@ -28,7 +28,28 @@ def _parse(pdf, path):
         raise ValueError(
             f"{path}: page 1 does not identify a supported Bill of Entry form. "
             "A scanned or image-only first page cannot be recognised.")
-    return form_type, parser.parse(pdf, form_type, Path(path).name)
+    boe = parser.parse(pdf, form_type, Path(path).name)
+    if form_type == "ICEGATE BOE":
+        _name_suppliers(pdf, boe)
+    return form_type, boe
+
+
+def _name_suppliers(pdf, boe):
+    """Name each invoice's supplier from the block Part II prints for it.
+
+    The parser reads the line under the heading, which holds the supplier and
+    the third party side by side where a bill names both -- it then reported
+    "VALOCITYCRAFT (THAILAND) CO.,LTD CREATIVE TOOLS HK COMPANY LIMITED", two
+    companies as one. The table reader already cuts the two blocks apart, so
+    the name is the first line of the supplier's own block.
+    """
+    from .icegate_tables import read_tables
+
+    blocks = [pair.value for pair in read_tables(pdf)
+              if pair.label == "3.SUPPLIER NAME & ADDRESS"]
+    for invoice, block in zip(boe.invoices, blocks):
+        if block:
+            invoice.supplier = block.split(", ")[0]
 
 
 def extract(path):
